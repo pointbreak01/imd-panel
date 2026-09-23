@@ -12,14 +12,31 @@ It shows what your seat is doing and what it costs you, what the network is doin
 operate the worker from the browser: tiers, concurrency, skills, restart, updates and rollbacks, a
 budget guard for your Claude plan, and Telegram notifications.
 
-> **Built for the Claude Code runtime.** Task tokens, costs, turns, transcripts and the plan usage
-> meter come from Claude Code's own session files and OAuth credentials on the same machine. With the
-> Codex runtime the panel still works — journal, swarm, network data, settings, updates — but the
-> per-task cost and transcript views stay empty.
->
-> **Personal project.** This is one operator's panel, shared as is. Updates follow my own needs and
-> may be irregular; the IdentityMD API and worker change often and things may break. Fork it, bend
-> it, send a PR if you like.
+## Made for Claude
+
+This panel is **built for workers that run on the Claude Code runtime** (`imd start --runtime claude`).
+Task tokens, costs, turns, the transcript viewer and the plan-usage meter all come from Claude Code's
+own session files and OAuth credentials on the same machine, and the whole thing was built and is
+maintained with Claude Code. With the Codex runtime it still starts — journal, swarm, network data,
+settings, updates — but every per-task cost and transcript view stays empty.
+
+**Personal project, shared as is.** Updates follow one operator's needs and may be irregular; the
+IdentityMD API and worker change often and things will break now and then. Fork it and bend it.
+
+### Let your AI assistant install it
+
+Open a terminal on the machine that runs your worker, start Claude Code (or any coding agent) and paste:
+
+```text
+Install imd-panel from https://github.com/<you>/imd-panel on this machine. It is a local control panel
+for the IdentityMD worker: read its README.md first. Check the requirements (Linux, user systemd
+session with lingering, the worker installed as a user service with the claude runtime, python3 >= 3.9),
+clone it into ~/imd-panel, run ./install.sh, confirm imd-panel.service is active, and tell me the exact
+SSH tunnel command to open it from my computer. If anything in my setup differs from the defaults
+(worker unit name, paths), write a panel.json based on panel.example.json instead of editing the code.
+```
+
+If something breaks later, the same assistant with `README.md` and the failing file is the support line.
 
 ## What you get
 
@@ -103,7 +120,7 @@ worker unit and its config; nothing is run with elevated privileges (`NoNewPrivi
 
 There is no support channel. Ask your AI assistant: open this folder in Claude Code (or any coding
 agent), point it at `README.md` and the file you are stuck on, and describe what you see — that is how
-this panel was built and how it is maintained. Issues and pull requests are welcome, answers may take a while.
+this panel was built and how it is maintained.
 
 ## Credits
 
