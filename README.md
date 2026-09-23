@@ -30,10 +30,11 @@ Open a terminal on the machine that runs your worker, start Claude Code (or any 
 ```text
 Install imd-panel from https://github.com/pointbreak01/imd-panel on this machine. It is a local control panel
 for the IdentityMD worker: read its README.md first. Check the requirements (Linux, user systemd
-session with lingering, the worker installed as a user service with the claude runtime, python3 >= 3.9),
-clone it into ~/imd-panel, run ./install.sh, confirm imd-panel.service is active, and tell me the exact
-SSH tunnel command to open it from my computer. If anything in my setup differs from the defaults
-(worker unit name, paths), write a panel.json based on panel.example.json instead of editing the code.
+session with lingering, the worker installed as a user service with the claude runtime, python3 >= 3.9,
+pipx), install it with `pipx install git+https://github.com/pointbreak01/imd-panel` and `imd-panel install`,
+confirm imd-panel.service is active, and tell me the exact SSH tunnel command to open it from my
+computer. If anything in my setup differs from the defaults (worker unit name, paths), write
+~/.config/imd-panel/panel.json based on panel.example.json instead of editing the code.
 ```
 
 If something breaks later, the same assistant with `README.md` and the failing file is the support line.
@@ -54,18 +55,18 @@ premium model, and every worker task is what it is. Everything else reads local 
 
 ## Requirements
 
-- Linux with a **user** systemd session (`loginctl enable-linger $USER` so it survives logout).
+- Linux with a **user** systemd session (`loginctl enable-linger $USER` so the panel survives logout).
 - The IdentityMD worker installed as a user service (`imd service install --auto-update`), runtime
   `claude`. The panel reads its journal with `journalctl --user`.
-- Python 3.9+. Nothing to `pip install`.
+- Python 3.9+ and [pipx](https://pipx.pypa.io) (`sudo apt install pipx` on Debian/Ubuntu, which also
+  brings `python3-venv`). No other dependency: the panel is standard library only.
 - Optional: Foundry's `forge` on PATH for `imd doctor`; `npm` (comes with the worker's node) for rollbacks.
 
 ## Install
 
 ```sh
-git clone https://github.com/pointbreak01/imd-panel.git ~/imd-panel
-cd ~/imd-panel
-./install.sh            # user unit imd-panel.service on 127.0.0.1:8787
+pipx install git+https://github.com/pointbreak01/imd-panel
+imd-panel install            # user unit imd-panel.service on 127.0.0.1:8787
 ```
 
 Then, from your own computer:
@@ -75,11 +76,27 @@ ssh -N -L 8787:127.0.0.1:8787 <user>@<your host>
 # open http://localhost:8787
 ```
 
-`./install.sh 8790` picks another port. Logs: `journalctl --user -u imd-panel -f`.
+`imd-panel install --port 8790` picks another port. `imd-panel uninstall` removes the service and keeps
+your settings. Logs: `journalctl --user -u imd-panel -f`. Settings, notifications, history and the
+worker release archives live in `~/.config/imd-panel/` (or `$IMD_PANEL_HOME`), never inside the package.
+
+From a source checkout instead of pipx: `git clone … ~/imd-panel && ~/imd-panel/install.sh`, which runs
+the package in place.
+
+## Updating
+
+The panel does not update itself. When you want the latest version:
+
+```sh
+pipx upgrade imd-panel && systemctl --user restart imd-panel
+```
+
+(`pipx reinstall imd-panel` if pipx refuses to upgrade a git install.) This restarts the panel only; the
+worker is never touched. From a source checkout: `git -C ~/imd-panel pull && systemctl --user restart imd-panel`.
 
 ### Configuration (optional)
 
-Copy `panel.example.json` to `panel.json` if your setup differs from the defaults:
+Copy `panel.example.json` to `~/.config/imd-panel/panel.json` if your setup differs from the defaults:
 
 | key | default | meaning |
 |---|---|---|
@@ -90,25 +107,25 @@ Copy `panel.example.json` to `panel.json` if your setup differs from the default
 | `identitymdHome` | `~/.identitymd` | where the worker keeps `config.json` and `work/` |
 
 Notifications (Telegram bot or HTTPS webhook) and the budget guard are configured from the Settings tab;
-they live in `notify.json` and `guard.json` next to the code, which are git-ignored.
+they live in `notify.json` and `guard.json` in `~/.config/imd-panel/`.
 
 ## How it works
 
-- `collect.py` joins three sources: the worker's journal (accepted / submitted / released / cancelled,
+- `imd_panel/collect.py` joins three sources: the worker's journal (accepted / submitted / released / cancelled,
   heartbeats, updates), Claude Code transcripts in `~/.claude/projects/*identitymd-work*/` (model, effort,
   turns, tokens, cost, tools, session-limit errors), and the public control plane `api.imd.fun`
   (seat record, submissions and verdicts, standing, health, contributors, earnings, swarm, publications,
   the pinned inputs of a task). Tiers are resolved against an append-only log of your inference config,
   so a task keeps the tier it actually ran under.
-- `server.py` is a stdlib HTTP server: `/` is the page, `/api/data` the JSON, `/api/transcript?id=` one
+- `imd_panel/server.py` is a stdlib HTTP server: `/` is the page, `/api/data` the JSON, `/api/transcript?id=` one
   task, `/api/history` the daily rows. POST actions (config, worker, skills, doctor, guard, notify, update)
   require the `X-Dashboard: 1` header and a loopback client; they run `systemctl --user`, edit
   `~/.identitymd/config.json` and the worker unit, run `imd doctor` / `imd update`, or `npm install -g`
   a verified release archive for a rollback.
 - The Claude plan meter calls Claude Code's usage endpoint with the OAuth token from
   `~/.claude/.credentials.json`. The token never leaves the machine and is never shown.
-- `history.py` snapshots daily aggregates into `history.sqlite`; the swarm tab samples `/swarm` into
-  `swarm.sqlite` once a minute.
+- `imd_panel/history.py` snapshots daily aggregates into `history.sqlite`; the swarm tab samples `/swarm` into
+  `swarm.sqlite` once a minute. Both live in `~/.config/imd-panel/`.
 
 ## Security notes
 

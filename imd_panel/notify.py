@@ -1,9 +1,9 @@
 """Event notifier for the IMD dashboard: Telegram bot and/or generic webhook. Config in notify.json (mode 600)."""
 import json, os, sys, time, urllib.request, urllib.parse
+from .paths import state
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-FILE = os.path.join(HERE, "notify.json")
-STATE = os.path.join(HERE, "notify.state.json")
+FILE = state("notify.json")
+STATE = state("notify.state.json")
 DEFAULT = {"telegramToken": "", "telegramChatId": "", "webhookUrl": "",
            "events": {"limit": True, "guard": True, "heartbeat": True, "worker": True, "rejected": True, "disk": True, "released": True, "daily": True, "standing": True},
            "heartbeatMin": 5, "diskGB": 10, "dailyHourUTC": 8}

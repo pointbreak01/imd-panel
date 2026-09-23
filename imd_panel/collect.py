@@ -6,11 +6,11 @@ import glob, json, os, re, subprocess, time
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 
-import tiers
+from . import tiers
+from .paths import HERE, STATE_DIR, state
 
 HOME = os.path.expanduser("~")
 PROJECTS = os.path.join(HOME, ".claude", "projects")
-HERE_DIR = os.path.dirname(os.path.abspath(__file__))
 PANEL_DEFAULTS = {"workerUnit": "identitymd-worker.service", "cleanUnit": None, "proxyPorts": [], "pruneWorkDays": 3, "pruneTranscriptDays": 14, "identitymdHome": None}
 
 
@@ -18,7 +18,7 @@ def load_panel():
     """panel.json next to the code (optional): unit names, local proxy ports, prune ages. Missing keys keep the defaults."""
     cfg = dict(PANEL_DEFAULTS)
     try:
-        with open(os.path.join(HERE_DIR, "panel.json")) as fh:
+        with open(state("panel.json")) as fh:
             cfg.update({k: v for k, v in json.load(fh).items() if k in PANEL_DEFAULTS})
     except (OSError, ValueError):
         pass
@@ -1280,7 +1280,7 @@ def collect():
 
 # ================================================================ the swarm: fleet, events, what the network is doing, our crew
 import sqlite3
-SWARM_DB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "swarm.sqlite")
+SWARM_DB = state("swarm.sqlite")
 _explorer_agents = {}  # tokenId -> (ts, explorer /api/agents/:id)
 
 
@@ -1509,8 +1509,8 @@ def collect():
 
 # ================================================================ worker releases & installation (Settings → worker updates)
 WORKER_REPO = "Identity-md/worker"
-VERSIONS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "worker-versions")
-UPDATES_LOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "updates.json")
+VERSIONS_DIR = state("worker-versions")
+UPDATES_LOG = state("updates.json")
 
 
 def worker_root():

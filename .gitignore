@@ -13,3 +13,9 @@ __pycache__/
 *.bak
 *.pre-*
 *.tmp
+
+# packaging
+build/
+dist/
+*.egg-info/
+.venv/

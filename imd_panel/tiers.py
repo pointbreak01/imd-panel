@@ -13,9 +13,9 @@ worker reads config.json at startup, so an edit that has not been restarted into
 is not yet deciding anything.
 """
 import json, os
+from .paths import state
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-LOG = os.path.join(HERE, "config-history.json")
+LOG = state("config-history.json")
 TIERS = ("standard", "economy", "premium")
 # systemd reports start times to the second, so a restart the dashboard fires
 # right after writing config.json can look a fraction of a second too early.

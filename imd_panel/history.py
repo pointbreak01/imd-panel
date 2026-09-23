@@ -1,9 +1,9 @@
 """Daily history snapshots in SQLite so the dashboard keeps months of aggregates after transcripts are pruned."""
 import json, os, sqlite3, time
+from .paths import state
 from collections import Counter
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-DB = os.path.join(HERE, "history.sqlite")
+DB = state("history.sqlite")
 RECOMPUTE_DAYS = 3  # verdicts and on-chain feedback arrive after the fact
 
 
