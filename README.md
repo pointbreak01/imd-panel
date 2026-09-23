@@ -99,6 +99,12 @@ The panel binds `127.0.0.1` and has no authentication of its own: anyone who can
 machine can operate your worker. Use the SSH tunnel, do not expose the port. Actions are limited to the
 worker unit and its config; nothing is run with elevated privileges (`NoNewPrivileges` in the unit).
 
+## Support
+
+There is no support channel. Ask your AI assistant: open this folder in Claude Code (or any coding
+agent), point it at `README.md` and the file you are stuck on, and describe what you see — that is how
+this panel was built and how it is maintained. Issues and pull requests are welcome, answers may take a while.
+
 ## Credits
 
 Pepe and the room's look are by [imd.fun](https://imd.fun), used with the author's permission.
