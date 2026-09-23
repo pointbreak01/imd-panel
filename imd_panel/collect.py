@@ -490,24 +490,6 @@ def unit_concurrency():
         return None
 
 
-def explorer_rows(s):
-    """One entry per submission row of an agent page: where the explorer links it, the label it prints in bold
-    (a step kind such as "Manifest" / "Build contract project", or the answer for an oracle seat), the verdict
-    tag and its word ("agreed" / "differed" / "completed" …)."""
-    rows = {}
-    parts = re.split(r'\["\$","article","([0-9a-f]{64})",', s)
-    for i in range(1, len(parts), 2):
-        key, body = parts[i], parts[i + 1][:6000]
-        href = re.search(r'"href":"(/jobs/[^"]+)"', body)
-        title = re.search(r'"row-title","children":"([^"]*)"', body)
-        meta = re.search(r'"row-meta","children":\[(.*?)\]\}\],"\$undefined"', body, re.S)
-        b = re.search(r'\["\$","b",null,\{"children":"([^"]+)"\}\]', meta.group(1) if meta else body)
-        st = re.search(r'"tag state s-([a-z]+)","children":\[.*?,"([^"]*)"\]', body)
-        rows[key[:12]] = {"href": href.group(1) if href else None, "label": b.group(1) if b else None, "state": st.group(1) if st else None,
-                          "word": st.group(2) if st else None, "tags": re.findall(r'"className":"tag","children":"([^"]*)"', body), "title": title.group(1) if title else None}
-    return rows
-
-
 def explorer_fetch(token_id):
     """The explorer's own JSON readout for the agent. Rows, verdicts and job links now come from the control
     plane (see the "public API" section below), so the agent page is no longer scraped."""
@@ -730,90 +712,17 @@ def by_short_names(trs, sid):
     return out
 
 
-# ================================================================ ERC-8004 registry (8004scan.io)
-SCAN_API = "https://api.8004scan.io/api/v1"
 ETHERSCAN = "https://etherscan.io"
-
-
-def scan8004_fetch(cfg_agent_id=None):
-    """Agent record + on-chain feedbacks from 8004scan. Agent id comes from the IMD off-chain metadata."""
-    token = read_config().get("tokenId")
-    meta = json.loads(http_get(f"https://api.imd.fun/agents/by-token/{token}.json"))
-    reg = (meta.get("registrations") or [{}])[0]
-    agent_id, chain = reg.get("agentId"), reg.get("chainId", 1)
-    out = {"agentId": agent_id, "chainId": chain, "url": f"https://8004scan.io/agents/ethereum/{agent_id}", "feedbacks": {}}
-    if not agent_id:
-        return out
-    a = json.loads(http_get(f"{SCAN_API}/agents/{chain}/{agent_id}"))
-    out["agent"] = {k: a.get(k) for k in ("name", "total_score", "rank", "network_rank", "star_count", "watch_count", "is_verified", "is_active",
-                                           "total_feedbacks", "total_validations", "owner_address", "created_tx_hash", "created_at", "updated_at")}
-    out["scores"] = a.get("scores") or {}
-    out["scores"].pop("breakdown", None)
-    out["registryTx"] = f"{ETHERSCAN}/tx/{a['created_tx_hash']}" if a.get("created_tx_hash") else None
-    # per-task feedback used to be paged from 8004scan; the seat's reviews on api.imd.fun carry the same tx hashes
-    out["feedbackCount"] = len(out["feedbacks"])
-    return out
-
-
-_collect_v2 = collect
-
-
-def collect():
-    d = _collect_v2()
-    sc = memo("scan8004", 1800, scan8004_fetch)
-    fbs = sc.get("feedbacks", {}) if isinstance(sc, dict) else {}
-    d["scan"] = {k: v for k, v in sc.items() if k != "feedbacks"} if isinstance(sc, dict) else {"error": str(sc)}
-    for t in d["tasks"]:
-        fb = fbs.get(t.get("job") or "")
-        t["onchain"] = fb
-    d["totals"]["onchain"] = sum(1 for t in d["tasks"] if t.get("onchain"))
-    return d
 
 
 # ================================================================ rejection reasons + transcript viewer
 WORK = os.path.join(IDENTITYMD_HOME, "work")
-_reasons = {}  # job -> (ts, reason dict)
-
-
-def job_reason(job, submission_id):
-    """Our attempt's verdict line on the explorer job page: state word + note (e.g. 'differed — by a different recipe: log-sum')."""
-    hit = _reasons.get(job)
-    # a verdict is kept 6 h; a miss (the explorer has no page yet while the job is still executing) only 10 min
-    if hit and time.time() - hit[0] < (600 if hit[1].get("error") else 6 * 3600):
-        return hit[1]
-    out = {"state": None, "note": None, "value": None}
-    try:
-        page = http_get(f"{EXPLORER}/jobs/{job}", timeout=30)
-        chunks = re.findall(r'self\.__next_f\.push\(\[1,"((?:[^"\\]|\\.)*)"\]\)', page)
-        s = "".join(json.loads('"' + c + '"') for c in chunks)
-        i = s.find('"div","%s' % submission_id) if submission_id else -1
-        if i >= 0:
-            body = s[i:i + 3000]
-            m = re.search(r'"detail-state-word","children":"([^"]*)"', body); out["value"] = m.group(1) if m else None
-            m = re.search(r'"tag state s-([a-z]+)","children":\[\[.*?\],"([^"]*)"\]', body)
-            if m: out["state"], out["word"] = m.group(1), m.group(2)
-            m = re.search(r'"className":"dim","children":(\[[^\]]*\]|"[^"]*")', body)
-            if m:
-                v = json.loads(m.group(1)); out["note"] = "".join(v) if isinstance(v, list) else v
-        out["reason"] = " — ".join(x for x in (out.get("word"), out.get("note")) if x) or None
-    except Exception as e:
-        out["error"] = str(e)[:120]
-    _reasons[job] = (time.time(), out)
-    return out
-
 
 _collect_v3 = collect
 
 
 def collect():
     d = _collect_v3()
-    budget = 3  # at most 3 new explorer page fetches per collect() call
-    for t in d["tasks"]:
-        if t.get("verdict") == "rejected" and t.get("job"):
-            cached = _reasons.get(t["job"])
-            if cached or budget > 0:
-                if not cached: budget -= 1
-                t["reason"] = job_reason(t["job"], t.get("submissionId"))
     # the explorer publishes a job page only once the job is done; while it is still executing the agent page shows
     # the job's short hash without a link — send those to the agent's pending list instead of a 404
     ex = d.get("explorer") or {}
@@ -1189,6 +1098,88 @@ def earnings_fetch(wallet):
     return {"wallet": wallet, "count": len(items), "items": items, "byChain": dict(by_chain), "url": f"{API}/wallets/{wallet}/earnings"}
 
 
+# ---------------------------------------------------------------- reputation registry: /feedback/batches + /jobs/:id/records
+# What the chain points at for this seat. /feedback/batches is the fleet-wide feed of batches written to the
+# reputation registry (each entry = one feedback about one submission, tagged with the seat); /jobs/:id/records
+# lists the work records of a job and their on-chain status. Both replace the 8004scan lookups.
+_records = {}  # job id -> (ts, value): the job's work records, from /jobs/:id/records
+
+
+def registry_fetch(token, oldest_iso=None, pages=4):
+    """Our seat's ERC-8004 registration (from /agents/by-token) plus every feedback-batch entry about this seat.
+    Pages the feed backwards until it is older than our oldest task (or `pages` pages of 500)."""
+    token = str(token)
+    meta = api_json(f"/agents/by-token/{token}.json", timeout=20)
+    reg = (meta.get("registrations") or [{}])[0]
+    agent_id, chain = reg.get("agentId"), reg.get("chainId", 1)
+    out = {"tokenId": token, "agentId": agent_id, "chainId": chain, "name": meta.get("name"), "active": meta.get("active"), "enrolled": meta.get("enrolled"),
+           "agentRegistry": (reg.get("agentRegistry") or "").split(":")[-1] or None, "collection": reg.get("tokenContract"),
+           "url": f"https://8004scan.io/agents/ethereum/{agent_id}" if agent_id else None, "docUrl": f"{API}/agents/by-token/{token}.json",
+           "batches": {"sent": 0, "queued": 0, "submitted": 0, "failed": 0, "total": 0}, "entries": {"count": 0, "positive": 0, "byTag": {}},
+           "bySub": {}, "byJob": {}, "lastSentAt": None, "lastTx": None, "workRegistry": None, "feedScanned": 0, "feedOldest": None}
+    before = None; scanned = 0
+    for _ in range(pages):
+        q = f"/feedback/batches?limit=500" + (f"&before={before}" if before else "")
+        d = api_json(q, timeout=40)
+        batches = d.get("batches") or []
+        if not batches:
+            break
+        for b in batches:
+            scanned += 1
+            out["workRegistry"] = out["workRegistry"] or b.get("workRegistry")
+            mine = [e for e in b.get("entries") or [] if str(e.get("tokenId")) == token]
+            if not mine:
+                continue
+            st = b.get("status") or "?"
+            out["batches"][st if st in out["batches"] else "failed"] += 1; out["batches"]["total"] += 1
+            row = {"batchId": b.get("id"), "jobId": b.get("jobId"), "status": st, "tx": b.get("txHash"), "txUrl": f"{ETHERSCAN}/tx/{b['txHash']}" if b.get("txHash") else None,
+                   "sentAt": b.get("sentAt"), "createdAt": b.get("createdAt"), "documentHash": b.get("documentHash"), "failure": b.get("failure"),
+                   "entries": [{"tag": e.get("tag1"), "policy": e.get("tag2"), "value": e.get("value"), "nodeKey": e.get("nodeKey"), "submissionHash": e.get("submissionHash")} for e in mine]}
+            if st == "sent" and b.get("sentAt") and (out["lastSentAt"] or "") < b["sentAt"]:
+                out["lastSentAt"], out["lastTx"] = b["sentAt"], b.get("txHash")
+            for e in mine:
+                out["entries"]["count"] += 1; out["entries"]["positive"] += 1 if e.get("value") == 1 else 0
+                tag = e.get("tag1") or "?"; out["entries"]["byTag"][tag] = out["entries"]["byTag"].get(tag, 0) + 1
+                h = (e.get("submissionHash") or "")[:12]
+                if h and (h not in out["bySub"] or REVIEW_RANK.get(st, 0) >= REVIEW_RANK.get(out["bySub"][h]["status"], 0)):
+                    out["bySub"][h] = dict(row, entry={"tag": e.get("tag1"), "policy": e.get("tag2"), "value": e.get("value"), "nodeKey": e.get("nodeKey")}, entries=None)
+            out["byJob"].setdefault(b.get("jobId"), []).append({k: row[k] for k in ("batchId", "status", "tx", "txUrl", "sentAt", "documentHash")})
+        before = batches[-1].get("createdAt"); out["feedOldest"] = before
+        if oldest_iso and before and before < oldest_iso:
+            break
+    out["feedScanned"] = scanned
+    out["lastTxUrl"] = f"{ETHERSCAN}/tx/{out['lastTx']}" if out.get("lastTx") else None
+    return out
+
+
+def records_fetch(job):
+    """GET /jobs/:id/records: the job's work records and whether each reached the chain."""
+    d = api_json(f"/jobs/{job}/records", timeout=20)
+    recs = d.get("records") or []
+    sent = [r for r in recs if r.get("status") == "sent" and r.get("txHash")]
+    st = Counter(r.get("status") or "?" for r in recs)
+    return {"job": job, "count": len(recs), "sent": st.get("sent", 0), "queued": st.get("queued", 0) + st.get("submitted", 0), "failed": sum(1 for r in recs if r.get("failure")),
+            "tx": sent[-1]["txHash"] if sent else None, "txUrl": f"{ETHERSCAN}/tx/{sent[-1]['txHash']}" if sent else None, "hash": (sent[-1].get("hash") if sent else (recs[-1].get("hash") if recs else None)),
+            "docUrl": f"{API}/work-records/{sent[-1]['hash']}.json" if sent else None, "registry": recs[0].get("registry") if recs else None,
+            "final": bool(recs) and all(r.get("status") == "sent" for r in recs), "fetchedAt": time.time()}
+
+
+def records_cached(job, budget):
+    """Cache in front of records_fetch: 6 h once every record is sent, 10 min while any is still queued."""
+    hit = _records.get(job)
+    if hit and time.time() - hit[0] < (6 * 3600 if hit[1].get("final") else 600):
+        return hit[1]
+    if budget[0] <= 0:
+        return hit[1] if hit else None
+    budget[0] -= 1
+    try:
+        v = records_fetch(job)
+    except Exception as e:
+        v = dict(hit[1], error=str(e)[:120]) if hit else {"job": job, "count": 0, "error": str(e)[:120], "final": False}
+    _records[job] = (time.time(), v)
+    return v
+
+
 def reason_from_server(m):
     """A one-line rejection / failure reason from our server-side attempt record."""
     if not m:
@@ -1261,7 +1252,25 @@ def collect():
             o = mine.get("oracle") or {}
             if o.get("status") and not (t.get("explorer") or {}).get("word"):
                 t.setdefault("explorer", {})["word"] = {"accepted": "agreed", "rejected": "differed"}.get(o["status"], o["status"])
+    # the reputation registry: feedback batches about this seat (replaces 8004scan) and the work records per job
+    oldest = min((t.get("acceptedAt") or 0 for t in d["tasks"] if t.get("acceptedAt")), default=None)
+    oldest_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(oldest)) if oldest else None
+    reg = memo("registry", 900, lambda: registry_fetch(token, oldest_iso)) if token else {}
+    d["registry"] = {k: v for k, v in reg.items() if k not in ("bySub", "byJob")} if isinstance(reg, dict) else {"error": str(reg)}
+    by_sub = reg.get("bySub") or {} if isinstance(reg, dict) else {}
+    rbudget = [4]  # new /jobs/:id/records fetches per collect()
+    for t in order:
+        fb = by_sub.get(t["submissionId"])
+        if fb:
+            t["feedback"] = {k: fb.get(k) for k in ("status", "tx", "txUrl", "sentAt", "documentHash", "jobId")}; t["feedback"]["entry"] = fb.get("entry")
+            if not t.get("onchain") and fb.get("status") == "sent" and fb.get("tx"):
+                t["onchain"] = {"tx": fb["tx"], "txUrl": fb["txUrl"], "status": "sent", "at": fb.get("sentAt"), "source": "feedback"}
+        if t.get("job") and t.get("verdict") in ("accepted", "rejected"):
+            rec = records_cached(t["job"], rbudget)
+            if rec:
+                t["records"] = {k: rec.get(k) for k in ("count", "sent", "queued", "failed", "tx", "txUrl", "docUrl", "error")}
     d["totals"]["onchain"] = sum(1 for t in d["tasks"] if t.get("onchain"))
+    d["totals"]["recordsSent"] = sum(1 for t in d["tasks"] if (t.get("records") or {}).get("sent"))
     d["totals"]["reviewsQueued"] = sum(1 for t in d["tasks"] if (t.get("review") or {}).get("status") in ("queued", "submitted"))
     by_id = {t["id"]: t for t in d["tasks"]}
     for r in d.get("running") or []:
@@ -1274,7 +1283,7 @@ def collect():
             if t.get("tier"): acc["tier:" + t["tier"]][t["verdict"]] += 1
             if t.get("model"): acc["model:" + t["model"]][t["verdict"]] += 1
     d["acceptance"] = {k: dict(v) for k, v in acc.items()}
-    d["subsCache"] = {"jobs": len(_subs), "budgetLeft": budget[0]}
+    d["subsCache"] = {"jobs": len(_subs), "budgetLeft": budget[0], "records": len(_records), "recordsBudgetLeft": rbudget[0]}
     return d
 
 

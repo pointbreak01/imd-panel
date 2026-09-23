@@ -2,7 +2,8 @@
 
 A local control panel for an [IdentityMD](https://imd.fun) contributor worker. One HTML page, one
 Python process, no dependencies beyond the standard library. It runs **on the machine that runs the
-worker**, listens on `127.0.0.1` only, and you reach it through an SSH tunnel.
+worker**, listens on `127.0.0.1` only, and you reach it through an SSH tunnel or a Tailscale tailnet.
+The page works on a phone too.
 
 ![now tab](docs/now.png)
 
@@ -83,6 +84,22 @@ worker release archives live in `~/.config/imd-panel/` (or `$IMD_PANEL_HOME`), n
 From a source checkout instead of pipx: `git clone … ~/imd-panel && ~/imd-panel/install.sh`, which runs
 the package in place.
 
+### Away from home: Tailscale
+
+To open the panel from your phone or another network without exposing a port, put the host on a
+[Tailscale](https://tailscale.com) tailnet and let `tailscale serve` front the local port:
+
+```sh
+curl -fsSL https://tailscale.com/install.sh | sh
+sudo tailscale up
+sudo tailscale serve --bg http://127.0.0.1:8787
+# prints https://<host>.<tailnet>.ts.net — open it from any device logged into the same tailnet
+```
+
+Nothing listens on the public IP: the HTTPS listener sits on the tailnet address only, the certificate
+is issued by Tailscale, and the panel keeps seeing requests from `127.0.0.1`. Your Tailscale login is
+the only gate, so keep two-factor on that account. `tailscale serve --https=443 off` undoes it.
+
 ## Updating
 
 The panel does not update itself. When you want the latest version:
@@ -130,7 +147,8 @@ they live in `notify.json` and `guard.json` in `~/.config/imd-panel/`.
 ## Security notes
 
 The panel binds `127.0.0.1` and has no authentication of its own: anyone who can reach that port on the
-machine can operate your worker. Use the SSH tunnel, do not expose the port. Actions are limited to the
+machine can operate your worker. Use the SSH tunnel or a Tailscale tailnet, do not expose the port or put
+it behind a plain reverse proxy (the localhost check on write actions would then pass for everyone). Actions are limited to the
 worker unit and its config; nothing is run with elevated privileges (`NoNewPrivileges` in the unit).
 
 ## Support

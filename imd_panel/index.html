@@ -2,7 +2,13 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="IMD worker">
 <title>IMD › Worker</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -380,6 +386,51 @@ a.ext{color:var(--dim);text-decoration:none;border-bottom:1px dotted var(--faint
   .lcd .v{font-size:22px}.tierrow{grid-template-columns:1fr 1fr}.tierrow .now{grid-column:1/-1;justify-self:start}
   .title{max-width:260px}td .ell{max-width:220px}th,td{padding:6px 8px}.pill-cell{padding:0 10px}
 }
+
+/* ---- mobile (≤720px): the same page, one column; nav wraps, tabs pin to the top, modal goes full screen ---- */
+@media (max-width:720px){
+  :root{--pill-h:36px}
+  .nav{padding-top:12px;gap:8px}
+  .nav-sites,.nav-tools{gap:8px}
+  .pill-cell{padding:0 9px;font-size:10.5px;letter-spacing:.04em}
+  .pill-brand{padding:0 12px;letter-spacing:.2em}
+  .pill-cell#updated{display:none}
+  .pill-cell#usagePill{white-space:nowrap}
+  .machine{padding-bottom:48px}
+  .machine h1{font-size:20px}
+  .headrow{gap:12px;margin-bottom:16px}
+  .tabs{position:sticky;top:0;z-index:20;background:var(--paper);flex-wrap:wrap;gap:0;margin:0 calc(-1 * var(--gutter)) 18px;padding:0 var(--gutter);border-bottom:1px solid var(--soft);overflow:visible}
+  .tabs>button[data-tab]{padding:12px 9px 13px;font-size:12.5px}
+  .tabs .spacer{display:none}
+  .tabs #rangeInfo{order:9;flex:1 1 auto;padding:6px 0;font-size:10.5px!important;color:var(--faint)}
+  .tabs .range{order:10;flex:0 0 auto;margin-left:auto;padding:4px 0 6px}
+  .tabs .range button{padding:6px 8px;font-size:11px}
+  .tabs .n{margin-left:4px}
+  h2{margin-top:28px}
+  .wtip{min-width:0;max-width:min(360px,calc(100% - 16px))}
+  .tscroll{max-height:none}
+  .kbd{display:none}
+  .modal{padding:0}
+  .mbox{width:100%;max-height:100vh;max-height:100dvh;height:100vh;height:100dvh;border:0}
+  .mhead{padding:8px 10px;position:sticky;top:0;background:var(--paper);z-index:2}
+  .mod .lbl{flex-wrap:wrap;gap:2px 12px}.mod .lbl .lr{flex:1 1 100%;text-align:left;white-space:normal}
+  .mhead{padding-right:44px}#mtitle{flex:1 1 100%}
+  .mtabs{gap:4px;flex-wrap:wrap}#mclose{position:absolute;top:8px;right:8px}
+  .mbody{padding:10px}
+  .mbody pre{max-height:60vh}
+  .ask .kv{grid-template-columns:1fr}
+  .pubgrid{grid-template-columns:1fr}
+  .pubbar input[type=search]{flex-basis:100%}
+  button,select,input{touch-action:manipulation}
+}
+@media (max-width:720px) and (pointer:coarse){
+  .tabs>button[data-tab]{padding-top:13px;padding-bottom:14px}
+  .pub .pf a,td a{padding:2px 0}
+}
+@media (max-width:400px){
+  .pill-cell{padding:0 7px;font-size:10px}
+  .tabs>button[data-tab]{padding:12px 7px 13px;font-size:12px}
+}
 </style>
 </head>
 <body>
@@ -394,7 +445,7 @@ a.ext{color:var(--dim);text-decoration:none;border-bottom:1px dotted var(--faint
   </div>
   <div class="nav-tools">
     <div class="pill"><span class="pill-cell"><i class="dot" id="dot"></i><span id="state">loading</span></span><span class="pill-cell" id="fleet"></span><span class="pill-cell" id="usagePill" title="Claude plan usage, as /usage reports it"></span><span class="pill-cell muted" id="updated"></span></div>
-    <div class="pill"><a class="pill-cell" id="agentLink" href="#" target="_blank" rel="noopener">explorer ↗</a><a class="pill-cell" id="scanLink" href="#" target="_blank" rel="noopener">8004scan ↗</a></div>
+    <div class="pill"><a class="pill-cell" id="agentLink" href="#" target="_blank" rel="noopener">explorer ↗</a><a class="pill-cell" id="scanLink" href="#" target="_blank" rel="noopener">registry ↗</a></div>
     <div class="pill"><button class="pill-cell icon" id="theme" title="light / dark">◐</button></div>
   </div>
 </header>
@@ -801,7 +852,7 @@ const COLS=[["acceptedAt","time (UTC)",t=>dt(t.acceptedAt)],["id","task",t=>t.jo
   ["open","",t=>`<a class="ext" data-open="${t.id}" title="prompt, timeline, produced files">📄</a>`],
   ["verdict","verdict",t=>t.verdict?`<span class="tag ${t.verdict==="accepted"?"ok":(t.verdict==="rejected"||t.verdict==="failed")?"alarm":""}" title="${esc(srvTitle(t))}">${t.verdict}</span>${t.reason&&t.reason.reason?`<span class="reason">${esc(t.reason.reason)}</span>`:t.explorer&&(t.explorer.answer||t.explorer.word)?`<span class="reason" style="color:var(--dim)">${esc([t.explorer.answer,t.explorer.word].filter(Boolean).join(" · "))}</span>`:""}`:'<span class="muted">–</span>'],
   ["field","field",t=>{const f=t.server&&t.server.field;return f&&f.attempts?`<span title="${f.attempts} attempts by ${f.seats} seats on this job, ${f.accepted} accepted · runtimes ${esc(Object.entries(f.runtimes||{}).map(([k,v])=>k+"×"+v).join(", "))}">${f.seats}<span class=muted>·${f.accepted}✓</span></span>`:'<span class="muted">–</span>'},"num",t=>(t.server&&t.server.field&&t.server.field.seats)||0],
-  ["onchain","onchain",t=>t.onchain?`<a class="ext" href="${t.onchain.txUrl}" target="_blank" rel="noopener" title="review sent to the reputation registry · ${t.onchain.at||""}">⛓ ✓</a>`:t.review?`<span class="muted" title="review ${t.review.status} (${t.review.policy||""}, ${t.review.verdict}) — the batch to the registry has not been sent yet">⛓ ${t.review.status}</span>`:'<span class="muted">–</span>',"",t=>t.onchain?2:t.review?1:0],
+  ["onchain","onchain",t=>t.onchain?`<a class="ext" href="${t.onchain.txUrl}" target="_blank" rel="noopener" title="${t.onchain.source==="feedback"?"feedback batch":"review"} sent to the reputation registry · ${t.onchain.at||""}${t.records?` · work record: ${t.records.sent||0}/${t.records.count||0} sent`:""}">⛓ ✓</a>${t.records&&t.records.txUrl?` <a class="ext" href="${t.records.txUrl}" target="_blank" rel="noopener" title="work record on chain (${t.records.sent}/${t.records.count} sent)">rec</a>`:""}`:t.review?`<span class="muted" title="review ${t.review.status} (${t.review.policy||""}, ${t.review.verdict}) — the batch to the registry has not been sent yet">⛓ ${t.review.status}</span>`:'<span class="muted">–</span>',"",t=>t.onchain?2:t.review?1:0],
   ["title","task",t=>`<span class="ell" title="${esc(t.title||"")}">${esc(t.title||"")}</span>`]];
 const TH_TIP={out:"output tokens generated by the model",fresh:"uncached input + cache writes — what burns quota",cache:"cache-read input tokens (cheap)",costUSD:"API-equivalent estimate",turns:"turns used / max turns"};
 function renderTasks(){
@@ -881,7 +932,7 @@ document.querySelectorAll("[data-log]").forEach(b=>b.onclick=async()=>{const w=b
 
 // wrap every scrolling table once; toggle edge shadows as it scrolls / resizes
 document.querySelectorAll(".tscroll").forEach(el=>{const w=document.createElement("div");w.className="tswrap";el.parentNode.insertBefore(w,el);w.appendChild(el);
-  const info=document.createElement("div");info.className="tsinfo";info.textContent="scroll sideways for more columns (shift + wheel)";w.parentNode.insertBefore(info,w.nextSibling);
+  const info=document.createElement("div");info.className="tsinfo";info.innerHTML="scroll sideways for more columns <span class=\"kbd\">(shift + wheel)</span>";w.parentNode.insertBefore(info,w.nextSibling);
   el.addEventListener("scroll",()=>syncScroll(el),{passive:true})});
 function syncScroll(one){(one?[one]:[...document.querySelectorAll(".tscroll")]).forEach(el=>{const w=el.parentNode;if(!w.classList.contains("tswrap"))return;
   w.classList.toggle("l",el.scrollLeft>2);w.classList.toggle("r",el.scrollWidth-el.clientWidth-el.scrollLeft>2)})}
@@ -1329,16 +1380,18 @@ function modChart(ctx,m,b,which){
 }
 // registry + explorer readouts
 function modRegistry(ctx,m,b){
-  const sc=D.scan||{},a=sc.agent||{},S=sc.scores||{};const link=$("#scanLink");if(sc.url){link.href=sc.url;link.textContent=`8004scan #${sc.agentId} ↗`}
-  label(ctx,b.x,b.ty+2,"05 · the registry");label(ctx,b.x+b.w,b.ty+2,a.name?`${a.is_active?"active":"inactive"}${sc.error?" · stale":""}`:"n/a",true);
+  const R=D.registry||{},bt=R.batches||{},en=R.entries||{},tot=D.totals||{};const link=$("#scanLink");if(R.url){link.href=R.url;link.textContent=`registry #${R.agentId} ↗`}
+  label(ctx,b.x,b.ty+2,"05 · the registry");label(ctx,b.x+b.w,b.ty+2,R.agentId?`${R.active?"active":"inactive"}${R.error?" · stale":""}`:"n/a",true);
   const sy=b.ty+PN.cell*.3,sh=b.y+b.h-sy;screen(ctx,b.x,sy,b.w,sh);
-  if(a.name){const lines=[`popularity ${S.popularity??"–"} · freshness ${S.freshness??"–"}`,`activity ${S.activity??"–"} · quality ${S.quality??"–"}`,`${a.total_feedbacks??"–"} feedbacks · ${sc.feedbackCount??"–"} linked`];const fs2=Math.max(8,Math.min(10,sh*.11));
-    // the score takes what is left once the three lines on the right have their room, so it never runs under them
-    ctx.font=`${fs2}px ${MONO}`;const lw=Math.max(...lines.map(l=>ctx.measureText(l).width));const score=String(a.total_score??"–");ctx.font=`700 10px ${MONO}`;const per=ctx.measureText(score).width/10;
-    const fs=Math.max(14,Math.min(sh*.42,(b.w-lw-34)/per));glow(ctx,PAL.lamp);ptext(ctx,b.x+12,sy+sh*.5+fs*.2,score,fs,PAL.lamp,700);noglow(ctx);ptext(ctx,b.x+12,sy+sh*.5+fs*.2+14,"TOTAL SCORE"+(a.rank?" · RANK "+a.rank:""),8,PAL.phosDim);
+  if(R.agentId){const pos=en.count?Math.round(100*(en.positive||0)/en.count):null;
+    const lines=[`${bt.sent||0} sent · ${(bt.queued||0)+(bt.submitted||0)} queued · ${bt.failed||0} failed`,`${en.count||0} feedbacks · ${pos==null?"–":pos+"%"} positive`,`${tot.onchain||0} tasks on chain · ${tot.recordsSent||0} records`];const fs2=Math.max(8,Math.min(10,sh*.11));
+    // the counter takes what is left once the three lines on the right have their room, so it never runs under them
+    ctx.font=`${fs2}px ${MONO}`;const lw=Math.max(...lines.map(l=>ctx.measureText(l).width));const score=String(bt.sent||0);ctx.font=`700 10px ${MONO}`;const per=ctx.measureText(score).width/10;
+    const fs=Math.max(14,Math.min(sh*.42,(b.w-lw-34)/per));glow(ctx,PAL.lamp);ptext(ctx,b.x+12,sy+sh*.5+fs*.2,score,fs,PAL.lamp,700);noglow(ctx);ptext(ctx,b.x+12,sy+sh*.5+fs*.2+14,"BATCHES SENT"+(R.lastSentAt?" · "+ago(R.lastSentAt):""),8,PAL.phosDim);
     lines.forEach((l,i)=>ptext(ctx,b.x+b.w-10,sy+sh*.32+i*fs2*1.5,l,fs2,PAL.phos,400,"right"))}
-  else ptext(ctx,b.x+b.w/2,sy+sh/2,"registry data not available",10,PAL.phosDim,400,"center");
-  modHit(m,tipHTML("The registry",`ERC-8004 record of this agent on 8004scan.io. ${a.name?`${esc(a.name)}: metadata ${S.metadata_completeness??"–"}% · ${a.is_verified?"verified":"unverified"} · ★ ${a.star_count||0} · ${(D.totals||{}).onchain||0} of your tasks have on-chain feedback.`:""}${sc.error?` <span style="color:#ff6b62">stale: ${esc(sc.error)}</span>`:""}`));
+  else ptext(ctx,b.x+b.w/2,sy+sh/2,R.error?"registry data not available":"loading registry…",10,PAL.phosDim,400,"center");
+  const tags=Object.entries(en.byTag||{}).map(([k,v])=>`${esc(k)} ${v}`).join(" · ");
+  modHit(m,tipHTML("The registry",`ERC-8004 agent ${R.agentId||"?"} (${esc(R.name||"")}) on chain ${R.chainId||1}. Feedback batches written to the reputation registry ${R.workRegistry?esc(R.workRegistry.slice(0,10))+"…":""} that mention this seat: ${bt.total||0} (${bt.sent||0} sent, ${(bt.queued||0)+(bt.submitted||0)} queued). ${tags?"Entries: "+tags+".":""} ${R.lastTxUrl?`Last tx: <a class="ext" href="${R.lastTxUrl}" target="_blank" rel="noopener">${esc((R.lastTx||"").slice(0,12))}…</a>.`:""} Feed scanned: ${R.feedScanned||0} batches back to ${R.feedOldest?esc(R.feedOldest.slice(0,16)):"–"}. Source: api.imd.fun /feedback/batches + /jobs/:id/records.${R.error?` <span style="color:#ff6b62">stale: ${esc(R.error)}</span>`:""}`));
 }
 // key/value rows on a phosphor screen; returns the row height so callers can register hits
 function srows(ctx,b,sy,sh,rows,kw){const fs=Math.max(8,Math.min(11.5,sh/(rows.length+1.2)*.62));const rh=Math.min(fs*1.65,(sh-8)/rows.length);kw=kw||fs*7.2;
@@ -1628,7 +1681,7 @@ function renderPublished(){const S=sw();const g=$("#pubGrid");if(!g)return;const
 const TABS=["now","swarm","tasks","history","settings","logs"];
 function showTab(name){if(name==="console")name="settings";if(!TABS.includes(name))name="now";document.querySelectorAll("#tabs [data-tab]").forEach(b=>b.classList.toggle("on",b.dataset.tab===name));document.querySelectorAll("section[data-tab]").forEach(s=>{const show=s.dataset.tab===name;if(show&&s.hidden){s.hidden=false;s.style.animation="none";void s.offsetWidth;s.style.animation=""}else s.hidden=!show});if(D){if(name==="history")renderHist();if(name==="now")renderPanel();if(name==="swarm"){renderSwarm();renderPublished()}}if(name==="swarm")radarStart();else radarStop();
   try{localStorage.setItem("tab",name)}catch(e){}if(location.hash!=="#/"+name)history.replaceState(null,"","#/"+name);syncScroll()}
-document.querySelectorAll("#tabs [data-tab]").forEach(b=>b.onclick=()=>showTab(b.dataset.tab));
+document.querySelectorAll("#tabs [data-tab]").forEach(b=>b.onclick=()=>{showTab(b.dataset.tab);if(matchMedia("(max-width:720px)").matches){const t=$("#tabs"),y=t.getBoundingClientRect().top+scrollY;if(scrollY<y-1)scrollTo({top:y,behavior:"smooth"})}});
 addEventListener("hashchange",()=>showTab(location.hash.replace(/^#\/?/,"")));
 (()=>{let t=location.hash.replace(/^#\/?/,"");if(!t){try{t=localStorage.getItem("tab")||""}catch(e){}}showTab(t||"now")})();
 
