@@ -4,13 +4,11 @@ import glob, json, os, re, shutil, subprocess, sys, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import collect
-import notify
-import history
+from . import collect, notify, history
+from .paths import HERE, state
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", "8787"))
 TTL = int(os.environ.get("CACHE_TTL", "20"))
-HERE = os.path.dirname(os.path.abspath(__file__))
 INDEX = os.environ.get("INDEX", "index.html")  # preview a candidate page without swapping the live one
 _lock = threading.Lock()
 _cache = {"ts": 0, "body": b""}
@@ -332,7 +330,7 @@ def act_update(body):
 
 
 # ---------------------------------------------------------------- budget guard
-GUARD_FILE = os.path.join(HERE, "guard.json")
+GUARD_FILE = state("guard.json")
 GUARD_DEFAULT = {"enabled": False, "sessionPct": 90, "weeklyPct": 0, "windowTokens": 0, "windowCost": 0, "dailyCost": 0, "waitForIdle": True, "resumeAtReset": True}
 _guard_state = {"paused": False, "pausedAt": None, "reason": "", "resumeAt": None, "lastCheck": None, "overrideUntil": None, "log": []}
 
@@ -477,9 +475,14 @@ def act_notify(body):
 ACTIONS = {"/api/update": act_update, "/api/doctor": act_doctor, "/api/notify": act_notify, "/api/config": act_config, "/api/skills": act_skills, "/api/worker": act_worker, "/api/cleanup": act_cleanup, "/api/guard": act_guard}
 
 
-if __name__ == "__main__":
+def serve(port=None):
+    port = port or PORT
     if not os.environ.get("NO_GUARD"):  # a preview instance must not act on the worker
         threading.Thread(target=guard_loop, daemon=True).start()
-    srv = ThreadingHTTPServer((HOST, PORT), H)
-    print("imd-panel listening on http://%s:%d" % (HOST, PORT), flush=True)
+    srv = ThreadingHTTPServer((HOST, port), H)
+    print("imd-panel listening on http://%s:%d (state in %s)" % (HOST, port, state("")), flush=True)
     srv.serve_forever()
+
+
+if __name__ == "__main__":
+    serve()

@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "imd-panel"
+version = "0.1.0"
+description = "Local control panel for an IdentityMD contributor worker (Claude Code runtime)"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.9"
+dependencies = []
+keywords = ["identitymd", "imd", "worker", "dashboard", "claude"]
+classifiers = ["Programming Language :: Python :: 3", "License :: OSI Approved :: MIT License", "Operating System :: POSIX :: Linux", "Environment :: Web Environment"]
+
+[project.urls]
+Homepage = "https://github.com/pointbreak01/imd-panel"
+
+[project.scripts]
+imd-panel = "imd_panel.__main__:main"
+
+[tool.setuptools]
+packages = ["imd_panel"]
+
+[tool.setuptools.package-data]
+imd_panel = ["index.html", "assets/*"]
