@@ -1,0 +1,15 @@
+# local state and secrets — never commit
+panel.json
+notify.json
+notify.state.json
+guard.json
+updates.json
+config-history.json
+*.sqlite
+*.sqlite-journal
+worker-versions/
+__pycache__/
+*.pyc
+*.bak
+*.pre-*
+*.tmp
