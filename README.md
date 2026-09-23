@@ -28,7 +28,7 @@ IdentityMD API and worker change often and things will break now and then. Fork 
 Open a terminal on the machine that runs your worker, start Claude Code (or any coding agent) and paste:
 
 ```text
-Install imd-panel from https://github.com/<you>/imd-panel on this machine. It is a local control panel
+Install imd-panel from https://github.com/pointbreak01/imd-panel on this machine. It is a local control panel
 for the IdentityMD worker: read its README.md first. Check the requirements (Linux, user systemd
 session with lingering, the worker installed as a user service with the claude runtime, python3 >= 3.9),
 clone it into ~/imd-panel, run ./install.sh, confirm imd-panel.service is active, and tell me the exact
@@ -63,7 +63,7 @@ premium model, and every worker task is what it is. Everything else reads local 
 ## Install
 
 ```sh
-git clone https://github.com/<you>/imd-panel.git ~/imd-panel
+git clone https://github.com/pointbreak01/imd-panel.git ~/imd-panel
 cd ~/imd-panel
 ./install.sh            # user unit imd-panel.service on 127.0.0.1:8787
 ```
