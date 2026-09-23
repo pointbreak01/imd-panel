@@ -138,8 +138,3 @@ worker unit and its config; nothing is run with elevated privileges (`NoNewPrivi
 There is no support channel. Ask your AI assistant: open this folder in Claude Code (or any coding
 agent), point it at `README.md` and the file you are stuck on, and describe what you see — that is how
 this panel was built and how it is maintained.
-
-## Credits
-
-Pepe and the room's look are by [imd.fun](https://imd.fun), used with the author's permission.
-Everything else is MIT, see `LICENSE`.
