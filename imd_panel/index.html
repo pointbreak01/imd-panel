@@ -447,6 +447,36 @@ section[data-tab="tasks"] .tscroll{max-height:calc(100vh - 150px)}
   .pill-cell{padding:0 7px;font-size:10px}
   .tabs>button[data-tab]{padding:12px 7px 13px;font-size:12px}
 }
+
+/* ---- mobile v2 (≤720px): the top bar as full-width rows, the remote and the tab buttons stretched across the screen ---- */
+@media (max-width:720px){
+  .nav{display:grid;grid-template-columns:1fr;gap:8px;padding-top:12px}
+  .nav-sites{display:grid;grid-template-columns:auto 1fr;gap:8px}
+  .nav-sites .pill:last-child .pill-cell{flex:1 1 0;justify-content:center;min-width:0}
+  .nav-tools{display:grid;grid-template-columns:1fr auto;gap:8px}
+  .nav-tools .pill{min-width:0}
+  .nav-tools .pill:first-child{grid-column:1/-1}
+  .nav-tools .pill .pill-cell{flex:1 1 0;justify-content:center;min-width:0;padding:0 6px;font-size:10.5px}
+  .nav-tools .pill .pill-cell#usagePill,.nav-tools .pill .pill-cell#fleet{overflow:hidden;text-overflow:ellipsis}
+  .nav-tools .pill:last-child .pill-cell{flex:none}
+  .headrow{display:grid;grid-template-columns:1fr;gap:12px}
+  .remote{width:100%;box-sizing:border-box;justify-content:space-between;padding:8px 16px 7px}
+  .remote .led{min-width:0;flex:1 1 auto}
+  .remote .keyc{flex:0 0 auto}
+  .tabs{display:grid;grid-template-columns:repeat(3,1fr);gap:0;margin:0 calc(-1 * var(--gutter)) 18px;padding:0;border-top:1px solid var(--soft);border-bottom:0}
+  .tabs>button[data-tab]{width:100%;margin:0;padding:12px 4px 12px;text-align:center;font-size:12.5px;border:0;border-right:1px solid var(--soft);border-bottom:2px solid var(--soft)}
+  .tabs>button[data-tab]:nth-child(3n){border-right:0}
+  .tabs>button[data-tab].on{border-bottom-color:var(--ink)}
+  .tabs #rangeInfo{display:none}
+  .tabs .range{grid-column:1/-1;order:10;display:grid;grid-template-columns:repeat(5,1fr);margin:0;padding:0;border-top:1px solid var(--soft);border-bottom:1px solid var(--soft)}
+  .tabs .range button{width:100%;margin:0;padding:9px 0;text-align:center;border:0;border-right:1px solid var(--soft)}
+  .tabs .range button:last-child{border-right:0}
+  .tabs .range button.on{background:var(--ink);color:var(--paper);text-decoration:none;font-weight:700}
+}
+@media (max-width:400px){
+  .tabs>button[data-tab]{font-size:12px;padding:11px 2px}
+  .nav-tools .pill .pill-cell{font-size:10px;padding:0 4px}
+}
 </style>
 </head>
 <body>
