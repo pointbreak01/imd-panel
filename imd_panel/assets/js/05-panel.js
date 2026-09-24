@@ -104,7 +104,7 @@ function modLamps(ctx,m,b){
 function modTop(ctx,m,b){
   const T=inRange().filter(t=>t.status!=="no-journal").sort((a,c)=>c.costUSD-a.costUSD).slice(0,8);const max=Math.max(1e-9,...T.map(t=>t.costUSD));
   label(ctx,b.x,b.ty+2,"03 · top consumers");label(ctx,b.x+b.w,b.ty+2,T.length?"in range":"no tasks",true);
-  const y0=b.ty+PN.cell*.35,rh=Math.min(PN.cell*.5,(b.y+b.h-y0)/Math.max(1,T.length));const fs=Math.max(8,Math.min(11,rh*.5));ctx.font=`${fs}px ${MONO}`;const idw=ctx.measureText("00000000").width+8,valw=ctx.measureText("$0.00 · 00.0k out").width+6;
+  const y0=b.ty+PN.cell*.35,rh=Math.min(PN.cell*.5,(b.y+b.h-y0)/Math.max(1,T.length));const fs=Math.max(8,Math.min(11,rh*.5));ctx.font=`${fs}px ${MONO}`;const idw=ctx.measureText("00000000").width+8,valw=Math.max(...T.map(t=>ctx.measureText(`${usd(t.costUSD)} · ${fmt(t.usage.output_tokens||0)} out`).width),0)+12;  // the real labels, not a template: "$15.93 · 936.5k out" is wider than "$0.00 · 00.0k out"
   T.forEach((t,i)=>{const y=y0+i*rh;const hot=PN.hot&&PN.hot.task===t;ptext(ctx,b.x,y+rh*.68,t.id,fs,hot?"#000":PAL.stroke,hot?700:400);ledBar(ctx,b.x+idw,y+rh*.2,Math.max(10,b.w-idw-valw),rh*.6,t.costUSD/max,mcol(t.model));ptext(ctx,b.x+b.w,y+rh*.68,`${usd(t.costUSD)} · ${fmt(t.usage.output_tokens||0)} out`,fs,PAL.stroke,400,"right");
     PN.hits.push({x:b.x,y,w:b.w,h:rh,mod:m,task:t,tip:tipHTML(t.id,`${esc((t.title||"").slice(0,120))}<br>${t.model?mi(t.model).n+(t.effort?" · "+t.effort:""):""} · ${t.tier||"?"} · ${t.turns} turns · ${fmt((t.usage||{}).output_tokens||0)} out · ${usd(t.costUSD)} · click to open`),click:()=>openTranscript(t.id)})});
   if(!T.length)ptext(ctx,b.x,y0+20,"no tasks in range",10,PAL.stroke);
