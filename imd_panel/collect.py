@@ -11,7 +11,7 @@ from .paths import HERE, STATE_DIR, state
 
 HOME = os.path.expanduser("~")
 PROJECTS = os.path.join(HOME, ".claude", "projects")
-PANEL_DEFAULTS = {"workerUnit": "identitymd-worker.service", "cleanUnit": None, "proxyPorts": [], "pruneWorkDays": 3, "pruneTranscriptDays": 14, "identitymdHome": None}
+PANEL_DEFAULTS = {"workerUnit": "identitymd-worker.service", "cleanUnit": None, "proxyPorts": [], "pruneWorkDays": 3, "pruneTranscriptDays": 14, "identitymdHome": None, "allowedHosts": []}
 
 
 def load_panel():
@@ -906,7 +906,8 @@ def transcript(short_id, max_chars=400000):
     if wd and os.path.isdir(wd) and os.path.realpath(wd).startswith(os.path.realpath(WORK) + os.sep):
         out["workDirExists"] = True
         try:
-            st = subprocess.run(["git", "-C", wd, "status", "--short", "--untracked-files=all"], capture_output=True, text=True, timeout=20).stdout
+            # the work dir was written by the task's agent: its .git/config must not get to run commands here
+            st = subprocess.run(["git", "-c", "core.fsmonitor=false", "-C", wd, "status", "--short", "--untracked-files=all"], capture_output=True, text=True, timeout=20).stdout
             out["gitStatus"] = st[:4000]
         except Exception: pass
         art = os.path.join(wd, "artifacts")
@@ -914,6 +915,8 @@ def transcript(short_id, max_chars=400000):
             for root, _, files in os.walk(art):
                 for f in sorted(files)[:20]:
                     fp = os.path.join(root, f)
+                    if os.path.islink(fp) or not os.path.realpath(fp).startswith(os.path.realpath(wd) + os.sep):
+                        continue  # an artifact that points elsewhere (e.g. at a credentials file) is not read
                     try:
                         size = os.path.getsize(fp)
                         with open(fp, encoding="utf-8", errors="replace") as fh:

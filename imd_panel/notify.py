@@ -26,6 +26,14 @@ def save(c):
     os.chmod(tmp, 0o600); os.replace(tmp, FILE)
 
 
+def masked(c):
+    """The config as the page sees it: the bot token and the webhook URL (a Discord/Slack webhook URL is itself the
+    credential) shortened to a hint, so they never leave the machine in the data feed."""
+    hook = c.get("webhookUrl") or ""
+    return {**c, "telegramToken": ("•••" + c["telegramToken"][-4:]) if c.get("telegramToken") else "",
+            "webhookUrl": (hook.split("/")[2] + "/•••" + hook[-4:]) if hook.count("/") >= 3 else ("•••" if hook else "")}
+
+
 def load_state():
     try:
         with open(STATE) as fh:
