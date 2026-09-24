@@ -5,7 +5,7 @@ from .paths import state
 FILE = state("notify.json")
 STATE = state("notify.state.json")
 DEFAULT = {"telegramToken": "", "telegramChatId": "", "webhookUrl": "",
-           "events": {"limit": True, "guard": True, "heartbeat": True, "worker": True, "rejected": True, "disk": True, "released": True, "daily": True, "standing": True},
+           "events": {"limit": True, "guard": True, "heartbeat": True, "worker": True, "rejected": True, "disk": True, "released": True, "daily": True, "standing": True, "wasted": True, "api": True},
            "heartbeatMin": 5, "diskGB": 10, "dailyHourUTC": 8}
 _hist = []  # (ts, text) recent sends for the UI
 
@@ -95,6 +95,15 @@ def check(d, guard_state):
     rel = [t for t in d.get("tasks", []) if t.get("status") == "rate-limited" and now - (t.get("endedAt") or t.get("acceptedAt", 0)) < 1800]
     if ev.get("released") and rel:
         once("released:%d" % int(now // 1800), f"↩️ <b>{len(rel)} task(s) released</b> on rate limit in the last 30 min (last: {rel[0]['id']})")
+    # 2b. work lost: a task released on the limit after real work (nothing was delivered; the job goes back to the queue)
+    if ev.get("wasted"):
+        for t in d.get("tasks", []):
+            if t.get("status") == "rate-limited" and ((t.get("turns") or 0) >= 10 or (t.get("durationS") or 0) >= 300) and now - (t.get("endedAt") or 0) < 6 * 3600:
+                once("wasted:" + t["id"], f"🗑 <b>Work lost</b> · {t['id']} released on the Claude limit after {int((t.get('durationS') or 0) // 60)} min · {t.get('turns')} turns · ${(t.get('costUSD') or 0):.2f} API-eq ({t.get('model') or '?'} {t.get('effort') or ''})\n{(t.get('title') or '')[:120]}", 10 ** 9)
+    # 2c. the public API grew: imd.fun/docs lists routes the dashboard has never seen
+    ar = ((d.get("network") or {}).get("apiRoutes") or {})
+    if ev.get("api") and ar.get("new"):
+        once("api:" + ",".join(x["route"] for x in ar["new"])[:200], "🧭 <b>imd.fun API changed</b> · " + str(len(ar["new"])) + " new route(s):\n" + "\n".join(x["route"] for x in ar["new"][:12]), 10 ** 9)
     # 3. guard
     if ev.get("guard") and guard_state.get("paused"):
         once("guard:%d" % int(guard_state.get("pausedAt") or 0), f"⏸ <b>Budget guard paused the worker</b> at {hm(guard_state['pausedAt'])}\n{guard_state.get('reason','')}\nresumes {hm(guard_state['resumeAt']) if guard_state.get('resumeAt') else 'manually'}")
