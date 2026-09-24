@@ -50,6 +50,7 @@ RE_STORED = re.compile(r"^submission stored \(([0-9a-f]+)\)")
 RE_ALIVE = re.compile(r"^(alive|disconnected) (\S+) · (idle|(\d+) tasks? running) · (\d+) submitted(?: · fleet (\d+) online, (\d+) enrolled)?")
 RE_CANCEL = re.compile(r"^cancelled ([0-9a-f]{8}): (.*)")
 RE_UPDATED = re.compile(r"^updated (\S+) → (\S+)")
+RE_UPDATE_FAILED = re.compile(r"^update failed: (.*)")
 _journal_rows_cache = [None]
 
 
@@ -127,10 +128,10 @@ def journal_events(rows):
         typ = None
         if msg.startswith("connected to") or msg.startswith("admitted"):
             typ = "connect"
+        elif msg.startswith("updated ") or msg.startswith("update ") or msg.startswith("an update "):
+            typ = "update"
         elif msg.startswith("server closed") or msg.startswith("reconnecting") or "lease" in low or msg.startswith("server error"):
             typ = "server"
-        elif msg.startswith("updated ") or "update" in low:
-            typ = "update"
         elif msg.startswith("build mismatch"):
             typ = "mismatch"
         elif "systemd" in msg or msg.startswith("shutting down") or msg.startswith("runtimes:"):
@@ -1572,6 +1573,12 @@ def updates_history(rows):
         m = RE_UPDATED.match(msg)
         if m:
             hist.append({"ts": ts, "from": m.group(1), "to": m.group(2), "by": "auto-update"})
+            continue
+        m = RE_UPDATE_FAILED.match(msg)
+        if m:  # the daemon refused a release (bad archive, unexpected file…) and stayed on its build; one row per distinct reason per hour
+            note = m.group(1)[:160]
+            if not any(h.get("action") == "failed" and h.get("note") == note and abs(h["ts"] - ts) < 3600 for h in hist):
+                hist.append({"ts": ts, "by": "auto-update", "action": "failed", "note": note})
     try:
         with open(UPDATES_LOG) as fh:
             hist += json.load(fh)
@@ -1594,6 +1601,215 @@ def collect():
                     "latest": latest, "available": bool(latest and inst.get("build") and latest["build"] != inst["build"]),
                     "autoUpdate": ((d.get("effective") or {}).get("unit") or {}).get("autoUpdate"),
                     "history": updates_history(_journal_rows_cache[0] or [])}
+    return d
+
+
+# ================================================================ protocol additions of 2026-09-24: workflows, research panels, fuzz campaigns,
+# delivered results, the three services, per-seat fleet records (imd.fun/docs, control plane 0.1.0+f986ffe7)
+JOB_FINAL = ("completed", "cancelled", "blocked", "failed", "superseded")
+_jobs = {}       # job id -> (ts, value)   /jobs/:id
+_workflows = {}  # workflow id -> (ts, value)   /workflows/:id
+_results = {}    # job id -> (ts, value)   /jobs/:id/result
+_panels = {}     # job id -> (ts, value)   /jobs/:id/panel or /jobs/:id/fuzz
+RE_UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+NODE_LABELS = {"panel": "research panel", "campaign": "fuzz campaign", "oracle_assess": "oracle"}
+
+
+def _cached(store, key, budget, fetch, final_ttl=6 * 3600, live_ttl=300):
+    """Generic cache: keep a final value for hours, a live one for minutes; budget = fetches still allowed in this collect()."""
+    hit = store.get(key)
+    if hit and time.time() - hit[0] < (final_ttl if hit[1].get("final") else live_ttl):
+        return hit[1]
+    if budget[0] <= 0:
+        return hit[1] if hit else None
+    budget[0] -= 1
+    try:
+        v = fetch(key)
+    except Exception as e:
+        v = dict(hit[1], error=str(e)[:120]) if hit else {"error": str(e)[:120], "final": False}
+    store[key] = (time.time(), v)
+    return v
+
+
+def job_fetch(job):
+    """GET /jobs/:id: state, template, the workflow it belongs to, delivery (repo / PR / media), site, launch and our step's node."""
+    j = api_json(f"/jobs/{job}", timeout=20)
+    wf = j.get("workflow") or {}; dv = j.get("delivery") or {}; site = j.get("site") or {}; la = j.get("launch") or {}
+    nodes = [{"key": n.get("key"), "role": n.get("role"), "state": n.get("state"), "attempt": n.get("attempt"), "failureReason": n.get("failureReason"),
+              "seat": str((n.get("seat") or {}).get("tokenId") or "") if isinstance(n.get("seat"), dict) else (str(n.get("seat")) if n.get("seat") else None),
+              "verdict": (n.get("verdict") or {}).get("status") if isinstance(n.get("verdict"), dict) else n.get("verdict")} for n in j.get("nodes") or []]
+    return {"job": job, "state": j.get("state"), "template": j.get("template"), "objective": (j.get("objective") or "")[:300], "createdAt": j.get("createdAt"), "updatedAt": j.get("updatedAt"),
+            "blockedReason": j.get("blockedReason"), "deliver": j.get("deliver"), "host": j.get("host"),
+            "workflowId": wf.get("id"), "workflowObjective": (wf.get("objective") or "")[:300],
+            "delivery": {k: dv.get(k) for k in ("repoUrl", "pullRequestUrl", "commit", "deliveredAt", "media", "failure")} if dv else None,
+            "site": {k: site.get(k) for k in ("id", "url", "status", "label", "ensName", "cid", "kind")} if site else None,
+            "launch": {k: la.get(k) for k in ("requested", "kind", "id", "status", "chainId")} if la and (la.get("requested") or la.get("id")) else None,
+            "nodes": nodes, "final": j.get("state") in JOB_FINAL, "url": f"{API}/jobs/{job}", "fetchedAt": time.time()}
+
+
+def workflow_fetch(wid):
+    """GET /workflows/:id: contracts → deployment → frontend → publication as one record."""
+    w = api_json(f"/workflows/{wid}", timeout=20)
+    stage = lambda k: ({kk: (w.get(k) or {}).get(kk) for kk in ("id", "state", "failure", "repoUrl", "commit")} if w.get(k) else None)
+    la = w.get("launch") or {}; site = w.get("site") or {}; fp = w.get("frontendPlan") or {}
+    stages = [("contracts", (w.get("contracts") or {}).get("state")), ("launch", la.get("status")), ("frontend", (w.get("frontend") or {}).get("state")), ("site", site.get("status"))]
+    return {"id": wid, "status": w.get("status"), "failure": w.get("failure"), "chainId": w.get("chainId"), "chain": chain_of(w.get("chainId"))["name"] if w.get("chainId") else None,
+            "objective": (w.get("objective") or "")[:400], "waitingForHosting": w.get("waitingForHosting"), "createdAt": w.get("createdAt"), "updatedAt": w.get("updatedAt"),
+            "contracts": stage("contracts"), "frontend": stage("frontend"), "frontendSkill": fp.get("skill"),
+            "launch": {"id": la.get("id"), "status": la.get("status")} if la else None,
+            "site": {k: site.get(k) for k in ("status", "ensName", "cid", "failure")} if site else None,
+            "siteUrl": f"https://{site['ensName']}.limo" if site.get("ensName") else None,
+            "stages": [{"name": n, "state": s} for n, s in stages if s], "final": w.get("status") in JOB_FINAL, "url": f"{API}/workflows/{wid}", "fetchedAt": time.time()}
+
+
+def result_fetch(job):
+    """GET /jobs/:id/result: the accepted source bundles, named output files (media, reports) and where they were delivered."""
+    r = api_json(f"/jobs/{job}/result", timeout=20)
+    files = [{"name": f.get("name"), "path": f.get("path"), "mediaType": f.get("mediaType"), "bytes": f.get("bytes"), "hash": f.get("hash"),
+              "url": (API + f["url"]) if (f.get("url") or "").startswith("/") else f.get("url")} for f in r.get("files") or []]
+    src = [{"node": s.get("node"), "evaluation": s.get("evaluation"), "profile": s.get("profile"), "url": s.get("url"), "hash": (s.get("hash") or "")[:12]} for s in r.get("source") or []]
+    dv = r.get("delivery") or {}
+    return {"job": job, "state": r.get("state"), "complete": r.get("complete"), "files": files, "source": src,
+            "delivery": {k: dv.get(k) for k in ("requested", "mode", "repoUrl", "pullRequestUrl", "commit", "deliveredAt", "failure", "ipfs", "cid")} if dv else None,
+            "launch": r.get("launch") if (r.get("launch") or {}).get("requested") else None, "final": bool(r.get("complete")), "url": f"{API}/jobs/{job}/result", "fetchedAt": time.time()}
+
+
+def panel_fetch(job, token=None):
+    """GET /jobs/:id/panel: a research panel — N answers wanted, quorum of matching ones; ours picked out by seat."""
+    p = api_json(f"/jobs/{job}/panel", timeout=20)
+    answers = p.get("answers") or []
+    mine = next((a for a in answers if str((a.get("seat") or {}).get("tokenId")) == str(token)), None)
+    u = (mine or {}).get("usage") or {}; rt = (mine or {}).get("runtime") or {}
+    return {"kind": "panel", "job": job, "state": p.get("state"), "wanted": p.get("wanted"), "quorum": p.get("quorum"), "answers": len(answers), "vendors": p.get("vendors"),
+            "seats": [str((a.get("seat") or {}).get("tokenId")) for a in answers],
+            "ours": {"turns": u.get("turns"), "output": u.get("outputTokens"), "wallClockMs": u.get("wallClockMs"), "citations": len(mine.get("citations") or []) if isinstance(mine.get("citations"), list) else mine.get("citations"),
+                     "finishedAt": mine.get("finishedAt"), "runtime": rt.get("id"), "model": rt.get("model"), "answer": (mine.get("answer") or "")[:1200]} if mine else None,
+            "final": p.get("state") in ("accepted", "rejected", "failed", "cancelled", "blocked"), "url": f"{API}/jobs/{job}/panel", "fetchedAt": time.time()}
+
+
+def fuzz_fetch(job, token=None):
+    """GET /jobs/:id/fuzz: a fuzz campaign — runs, confirmed findings, per-seat results; ours picked out by seat."""
+    f = api_json(f"/jobs/{job}/fuzz", timeout=20)
+    res = f.get("results") or []
+    mine = [r for r in res if str((r.get("seat") or {}).get("tokenId")) == str(token)]
+    last = mine[-1] if mine else None
+    return {"kind": "fuzz", "job": job, "state": f.get("state"), "runs": f.get("runs"), "confirmed": f.get("confirmed"), "results": len(res),
+            "outcomes": dict(Counter(r.get("outcome") or "?" for r in res)),
+            "ours": {"outcome": last.get("outcome"), "detail": (last.get("detail") or "")[:400], "property": last.get("property"), "runs": last.get("runs"),
+                     "verdictStatus": last.get("verdictStatus"), "verdictDetail": (last.get("verdictDetail") or "")[:300], "reportedAt": last.get("reportedAt"), "results": len(mine)} if last else None,
+            "final": f.get("state") in JOB_FINAL, "url": f"{API}/jobs/{job}/fuzz", "fetchedAt": time.time()}
+
+
+def services_fetch():
+    """GET /services + GET /version: verifier, publisher and deployer with their builds, and the control plane's commit."""
+    out = {"services": [], "build": None}
+    s = api_json("/services", timeout=15)
+    for x in s.get("services") or []:
+        out["services"].append({"kind": x.get("kind"), "version": x.get("version"), "up": x.get("up"), "lastSeenAt": x.get("lastSeenAt"), "claims": x.get("claims"), "key": x.get("key")})
+    try:
+        v = api_json("/version", timeout=10)
+        out["build"] = {"commit": (v.get("commit") or "")[:12], "branch": v.get("branch"), "deployedAt": v.get("deployedAt"), "protocolVersion": v.get("protocolVersion"),
+                        "features": sorted(k for k, on in (v.get("features") or {}).items() if on)}
+    except Exception as e:
+        out["buildError"] = str(e)[:120]
+    out["fetchedAt"] = time.time()
+    return out
+
+
+def seat_records_fetch(token):
+    """GET /seats/records: every seat's outcome totals — our rank by accepted, the fleet's totals and acceptance."""
+    d = api_json("/seats/records", timeout=30)
+    rows = d.get("seats") or []
+    for r in rows:
+        dec = (r.get("accepted") or 0) + (r.get("rejected") or 0) + (r.get("failed") or 0)
+        r["acceptRate"] = round((r.get("accepted") or 0) / dec * 100) if dec else None
+    rows.sort(key=lambda r: -(r.get("accepted") or 0))
+    ours = next((r for r in rows if str(r.get("tokenId")) == str(token)), None)
+    rank = next((i + 1 for i, r in enumerate(rows) if str(r.get("tokenId")) == str(token)), None)
+    tot = {k: sum(int(r.get(k) or 0) for r in rows) for k in ("attempts", "accepted", "rejected", "failed", "pending")}
+    dec = tot["accepted"] + tot["rejected"] + tot["failed"]
+    day_ago = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - 86400))
+    active = sum(1 for r in rows if (r.get("lastWorkedAt") or "") >= day_ago)
+    rates = sorted(r["acceptRate"] for r in rows if r["acceptRate"] is not None and (r.get("accepted") or 0) >= 20)
+    return {"count": len(rows), "ours": ours, "rank": rank, "totals": tot, "acceptRate": round(tot["accepted"] / dec * 100) if dec else None,
+            "medianAcceptRate": rates[len(rates) // 2] if rates else None, "activeDay": active, "top": rows[:8], "url": f"{API}/seats/records", "fetchedAt": time.time()}
+
+
+def kind_label_for(nk, role, current):
+    if nk in NODE_LABELS:
+        return NODE_LABELS[nk]
+    return current
+
+
+_collect_v7 = collect
+
+
+def collect():
+    d = _collect_v7()
+    cfg = d.get("config") or {}; token = str(cfg.get("tokenId") or "")
+    net = d.get("network") if isinstance(d.get("network"), dict) else None
+    sv = memo("services", 120, services_fetch)
+    if net is not None:
+        net["servicesDetail"] = sv.get("services") if isinstance(sv, dict) else None
+        net["build"] = sv.get("build") if isinstance(sv, dict) else None
+        net["servicesError"] = sv.get("error") if isinstance(sv, dict) else str(sv)
+    rec = memo("seatRecords", 900, lambda: seat_records_fetch(token)) if token else None
+    if isinstance(d.get("fleet"), dict):
+        d["fleet"]["seats"] = {k: v for k, v in rec.items() if k != "top"} if isinstance(rec, dict) else {"error": str(rec)}
+        d["fleet"]["seats"]["top"] = (rec or {}).get("top") if isinstance(rec, dict) else None
+    jb = [4]; wb = [3]; rb = [3]; pb = [3]
+    for t in d.get("tasks") or []:
+        job = t.get("job")
+        if not job:
+            m = RE_UUID.search(t.get("jobUrl") or "")
+            job = m.group(0) if m else None
+        nk = (t.get("seatWork") or {}).get("nodeKey") or ""
+        if not job or nk == "oracle_assess" or (t.get("kindLabel") == "oracle" and nk == ""):
+            continue  # oracle answers have no workflow, delivery or result files; nothing to fetch
+        t["kindLabel"] = kind_label_for(nk, (t.get("seatWork") or {}).get("role"), t.get("kindLabel"))
+        ji = _cached(_jobs, job, jb, job_fetch)
+        if not ji or (ji.get("error") and not ji.get("state")):
+            continue
+        t["job"] = job
+        node = next((n for n in ji.get("nodes") or [] if n.get("key") == nk), None) if nk else None
+        if not node and len(ji.get("nodes") or []) == 1:
+            node = ji["nodes"][0]
+        t["jobInfo"] = {"state": ji.get("state"), "template": ji.get("template"), "blockedReason": ji.get("blockedReason"), "delivery": ji.get("delivery"), "site": ji.get("site"),
+                        "launch": ji.get("launch"), "node": node, "nodes": len(ji.get("nodes") or []), "url": ji.get("url")}
+        if not nk and node and node.get("key"):
+            t["kindLabel"] = kind_label_for(node["key"], node.get("role"), t.get("kindLabel"))
+        if ji.get("workflowId"):
+            wf = _cached(_workflows, ji["workflowId"], wb, workflow_fetch)
+            stage = "frontend" if wf and (wf.get("frontend") or {}).get("id") == job else "contracts" if wf and (wf.get("contracts") or {}).get("id") == job else None
+            t["workflow"] = dict(wf or {"id": ji["workflowId"], "objective": ji.get("workflowObjective")}, stage=stage)
+        tmpl = ji.get("template") or ""
+        kind = "panel" if (nk == "panel" or tmpl == "research" or (node or {}).get("key") == "panel") else "fuzz" if (nk == "campaign" or tmpl == "fuzz" or (node or {}).get("key") == "campaign") else None
+        if kind:
+            pf = _cached(_panels, job, pb, (lambda j: panel_fetch(j, token)) if kind == "panel" else (lambda j: fuzz_fetch(j, token)))
+            if pf and pf.get("state"):
+                t[kind] = pf
+                if t.get("verdict") in (None, "pending"):  # these jobs have no /submissions record: the panel or campaign is the verdict
+                    if kind == "panel":
+                        if pf.get("ours") and pf["state"] == "accepted": t["verdict"] = "accepted"
+                        elif pf.get("ours") and pf["state"] in ("rejected", "failed"): t["verdict"] = "rejected"
+                    else:
+                        o = pf.get("ours") or {}
+                        if o.get("outcome") == "failed" or o.get("verdictStatus") == "rejected": t["verdict"] = "failed" if o.get("outcome") == "failed" else "rejected"
+                        elif o.get("verdictStatus") == "accepted" or (o.get("outcome") in ("confirmed", "ok", "clean") and pf["state"] == "completed"): t["verdict"] = "accepted"
+                    if t.get("verdict") in ("rejected", "failed") and not t.get("reason"):
+                        o = pf.get("ours") or {}
+                        t["reason"] = {"reason": (o.get("verdictDetail") or o.get("detail") or f"{kind} {pf['state']}")[:300], "source": "api", "state": t["verdict"]}
+        if t.get("verdict") == "accepted" and ji.get("state") == "completed":  # what the network kept and where it went
+            rs = _cached(_results, job, rb, result_fetch, live_ttl=600)
+            if rs and (rs.get("files") or rs.get("delivery") or rs.get("source")):
+                t["result"] = {k: rs.get(k) for k in ("complete", "files", "source", "delivery", "launch", "url")}
+    d["totals"]["workflows"] = len({t["workflow"]["id"] for t in d["tasks"] if t.get("workflow") and t["workflow"].get("id")})
+    d["totals"]["delivered"] = sum(1 for t in d["tasks"] if ((t.get("result") or {}).get("delivery") or {}).get("deliveredAt") or ((t.get("jobInfo") or {}).get("delivery") or {}).get("deliveredAt"))
+    d["subsCache"].update({"jobs2": len(_jobs), "workflows": len(_workflows), "results": len(_results), "panels": len(_panels), "jobsBudgetLeft": jb[0]})
+    by_id = {t["id"]: t for t in d["tasks"]}
+    for r in d.get("running") or []:
+        src = by_id.get(r["id"]) or {}
+        r["kindLabel"] = src.get("kindLabel") or r.get("kindLabel"); r["workflow"] = {"id": src["workflow"].get("id"), "stage": src["workflow"].get("stage")} if src.get("workflow") else None
     return d
 
 if __name__ == "__main__":
