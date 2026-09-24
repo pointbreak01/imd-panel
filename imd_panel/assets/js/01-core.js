@@ -41,18 +41,28 @@ function render(){
   $("#host").textContent=D.hostName||"";
   const la=D.lastAlive,age=la?Date.now()/1000-la.ts:1e9;
   const nRun=Math.max((D.running||[]).length,la.running||0);  // live task list beats the 30 s heartbeat line
-  $("#dot").className="dot "+(age>300?"off":nRun?"live":"on");
-  $("#state").textContent=age>300?`no heartbeat for ${dur(age)}`:nRun?`${nRun} task${nRun>1?"s":""} running`:"idle";
+  const disc=age<=300&&la.state==="disconnected";  // the worker logs it every 30 s while it cannot reach the network
+  $("#dot").className="dot "+(age>300||disc?"off":nRun?"live":"on");
+  $("#state").textContent=age>300?`no heartbeat for ${dur(age)}`:disc?`disconnected ${la.for||""}`:nRun?`${nRun} task${nRun>1?"s":""} running`:"idle";
   $("#fleet").textContent=la&&la.fleetOnline?`fleet ${la.fleetOnline}/${la.fleetEnrolled}`:"";const U=D.usage||{};$("#usagePill").textContent=U.fiveHour&&U.fiveHour.pct!=null?`5h ${Math.round(U.fiveHour.pct)}% · wk ${U.sevenDay?Math.round(U.sevenDay.pct):"?"}%`:"";$("#usagePill").style.color=U.fiveHour&&U.fiveHour.pct>=90?"var(--alarm)":"";
   const tid=D.explorer&&D.explorer.tokenId;$("#eyebrow").textContent=`identitymd contributor node${tid?` · agent #${tid}`:""} · ${D.hostName||""}`;
-  $("#headline").innerHTML=age>300?`<b>Silent</b> for ${dur(age)}.`:nRun?`<b>Working</b> on ${nRun} task${nRun>1?"s":""}.`:`<b>Online</b>, waiting for work.`;
+  $("#headline").innerHTML=age>300?`<b>Silent</b> for ${dur(age)}.`:disc?`<b>Disconnected</b> from the network${la.for?" for "+esc(la.for):""}, reconnecting.`:nRun?`<b>Working</b> on ${nRun} task${nRun>1?"s":""}.`:`<b>Online</b>, waiting for work.`;
   $("#updated").textContent=`${hm(D.generatedAt)} UTC`;
   // banner: recent limit
   const lm=D.limitMsgs[D.limitMsgs.length-1];const b=$("#banner");
   if(lm&&Date.now()/1000-lm.ts<3*3600){b.style.display="block";b.className="banner";b.textContent=`⚠ Claude session limit hit at ${dt(lm.ts)} UTC — “${lm.msg}”`}
   else if(D.journalError){b.style.display="block";b.className="banner lamp";b.textContent="journal unavailable: "+D.journalError}else b.style.display="none";
+  renderNet(la,disc);
   const al=$("#agentLink");if(D.explorer&&D.explorer.agentUrl){al.href=D.explorer.agentUrl;const a=D.explorer.agent;al.textContent=a?`#${D.explorer.tokenId} · ${a.accepted}/${a.attempts} ↗`:`#${D.explorer.tokenId} ↗`;al.title=a?`agent #${D.explorer.tokenId} on the explorer · ${a.accepted} of ${a.attempts} attempts accepted`:"agent page on the explorer"}
   renderDaily();renderRunning();renderPanel();renderPower();renderGuard();renderNotify();renderEpisodes();renderByModel();fillFilters();renderTasks();renderFeed();renderConfig();renderService();renderEffective();renderTierLog();syncScroll();
+}
+// network banner: a host the panel reads from is down (circuit breaker in collect.http_get) and/or the worker says it is disconnected
+function renderNet(la,disc){
+  const now=Date.now()/1000,nb=$("#netBanner");
+  const down=Object.entries(D.net||{}).filter(([h,s])=>s.down&&now-s.since>=60);  // a single blip is not news
+  const bits=down.map(([h,s])=>`${h} unreachable for ${dur(now-s.since)} (${s.error||"no answer"})${s.lastOk?` · network data as of ${hm(s.lastOk)} UTC`:" · no network data since the panel started"}`);
+  if(disc)bits.push(`the worker is disconnected from the network${la.for?" for "+la.for:""} and reconnects on its own`);
+  nb.style.display=bits.length?"block":"none";nb.textContent=bits.length?"⚠ "+bits.join(" — "):"";
 }
 function renderGuard(){
   const G=D.guard||{},c=G.config||{},st=G.state||{};

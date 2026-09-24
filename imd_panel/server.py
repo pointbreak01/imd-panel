@@ -17,7 +17,7 @@ MAX_BODY = 64 * 1024  # write actions carry small JSON bodies
 CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; "
        "img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
 LOCAL_HOSTS = ("localhost", "127.0.0.1", "[::1]")
-LITE_KEYS = ("hostName", "lastAlive", "running", "usage", "claudeProcs", "generatedAt", "collectMs", "host", "events", "standing", "quota", "rateLimits", "limitMsgs", "journalError", "totals")
+LITE_KEYS = ("hostName", "lastAlive", "running", "usage", "claudeProcs", "generatedAt", "collectMs", "host", "events", "standing", "quota", "rateLimits", "limitMsgs", "journalError", "totals", "net")
 
 
 def task_sig(raw):
