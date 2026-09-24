@@ -1879,6 +1879,10 @@ def api_docs_fetch():
         known = {"routes": {}, "firstRun": True}
     today = time.strftime("%Y-%m-%d", time.gmtime())
     first = known.get("firstRun") or not known.get("routes")
+    if first:
+        known["baselineDate"] = today
+    base = known.get("baselineDate") or (min(known["routes"].values()) if known.get("routes") else today)  # routes seen on the first visit are the baseline, never "new"
+    known["baselineDate"] = base
     new = [r for r in routes if r not in known["routes"]]
     gone = [r for r in known["routes"] if r not in routes]
     for r in new:
@@ -1893,8 +1897,8 @@ def api_docs_fetch():
     except OSError:
         pass
     recent = time.strftime("%Y-%m-%d", time.gmtime(time.time() - 14 * 86400))
-    return {"count": len(routes), "new": [] if first else [{"route": r, "since": today} for r in new], "recent": sorted(({"route": r, "since": dte} for r, dte in known["routes"].items() if dte >= recent and not first), key=lambda x: x["since"], reverse=True),
-            "removed": [{"route": r, "since": today} for r in gone] if not first else [], "baseline": today if first else None, "checkedAt": time.time(), "url": DOCS_URL}
+    return {"count": len(routes), "new": [] if first else [{"route": r, "since": today} for r in new], "recent": sorted(({"route": r, "since": dte} for r, dte in known["routes"].items() if dte >= recent and dte != base), key=lambda x: x["since"], reverse=True),
+            "removed": [{"route": r, "since": today} for r in gone] if not first else [], "baseline": base, "checkedAt": time.time(), "url": DOCS_URL}
 
 
 def pass_api_docs(d):
