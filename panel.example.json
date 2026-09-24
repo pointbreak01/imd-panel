@@ -4,5 +4,6 @@
   "proxyPorts": [],
   "pruneWorkDays": 3,
   "pruneTranscriptDays": 14,
-  "identitymdHome": null
+  "identitymdHome": null,
+  "allowedHosts": []
 }

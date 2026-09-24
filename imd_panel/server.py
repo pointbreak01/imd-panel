@@ -12,6 +12,11 @@ TTL = int(os.environ.get("CACHE_TTL", "20"))
 INDEX = os.environ.get("INDEX", "index.html")  # preview a candidate page without swapping the live one
 _lock = threading.Lock()
 _cache = {"ts": 0, "body": b""}
+MAX_BODY = 64 * 1024  # write actions carry small JSON bodies
+# the page loads its own scripts only and talks to this server only: an injected script can neither run inline nor phone home
+CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; "
+       "img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+LOCAL_HOSTS = ("localhost", "127.0.0.1", "[::1]")
 LITE_KEYS = ("hostName", "lastAlive", "running", "usage", "claudeProcs", "generatedAt", "collectMs", "host", "events", "standing", "quota", "rateLimits", "limitMsgs", "journalError", "totals")
 
 
@@ -31,13 +36,36 @@ def data(force=False):
             _cache["raw"] = d
             _cache["ts"] = time.time()
         d = dict(_cache["raw"]); d["guard"] = {"config": guard_cfg(), "state": _guard_state}; d["taskSig"] = task_sig(d)
-        nc = notify.cfg(); d["notify"] = {"config": {**nc, "telegramToken": ("•••" + nc["telegramToken"][-4:]) if nc.get("telegramToken") else ""}, "history": notify._hist[-10:]}
+        d["notify"] = {"config": notify.masked(notify.cfg()), "history": notify._hist[-10:]}
         return json.dumps(d, default=str).encode()
+
+
+def host_name(host):
+    """The name part of a Host header, lowercased: 'localhost:9787' -> 'localhost', '[::1]:9787' -> '[::1]'."""
+    host = (host or "").strip().lower()
+    if host.startswith("["):
+        return host[:host.find("]") + 1] if "]" in host else ""
+    return host.rsplit(":", 1)[0] if host.count(":") == 1 else host
 
 
 class H(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         sys.stderr.write("%s %s\n" % (self.address_string(), fmt % args))
+
+    def trusted(self, write=False):
+        """Refuse DNS rebinding (a page on another name pointed at 127.0.0.1 sends its own Host) and, for writes and
+        exports, cross-site requests (an Origin that is not this very host). Through the SSH tunnel every client is
+        127.0.0.1, so the address alone proves nothing."""
+        host = self.headers.get("Host") or ""
+        if host_name(host) not in LOCAL_HOSTS + tuple(h.lower() for h in collect.PANEL["allowedHosts"]):
+            return False
+        if write:
+            origin = self.headers.get("Origin")
+            if origin is not None and origin not in ("http://" + host, "https://" + host):
+                return False
+            if self.headers.get("X-Dashboard") != "1" or self.client_address[0] != "127.0.0.1":
+                return False
+        return True
 
     def send(self, code, ctype, body, cache="no-store"):
         # gzip text bodies over 2 KB when the client accepts it (the data feed is ~1.7 MB raw, ~220 KB gzipped)
@@ -49,16 +77,24 @@ class H(BaseHTTPRequestHandler):
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", cache)
+        self.send_header("X-Content-Type-Options", "nosniff")
+        if ctype.startswith("text/html"):
+            self.send_header("Content-Security-Policy", CSP); self.send_header("Referrer-Policy", "no-referrer")
         if enc:
             self.send_header("Content-Encoding", enc); self.send_header("Vary", "Accept-Encoding")
         self.end_headers()
         self.wfile.write(body)
 
-    # ---- write actions: localhost only + custom header (blocks cross-site form/XHR posts)
+    # ---- write actions: a local Host, a same-origin (or no) Origin, localhost and the custom header
     def do_POST(self):
-        if self.headers.get("X-Dashboard") != "1" or self.client_address[0] != "127.0.0.1":
+        if not self.trusted(write=True):
             return self.send(403, "application/json", b'{"error":"forbidden"}')
-        n = int(self.headers.get("Content-Length") or 0)
+        try:
+            n = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            n = -1
+        if not 0 <= n <= MAX_BODY:
+            return self.send(413, "application/json", b'{"error":"bad length"}')
         try:
             body = json.loads(self.rfile.read(n) or b"{}")
         except ValueError:
@@ -79,6 +115,8 @@ class H(BaseHTTPRequestHandler):
             return self.send(400, "application/json", json.dumps({"ok": False, "error": str(e)[:400]}).encode())
 
     def do_GET(self):
+        if not self.trusted():
+            return self.send(403, "text/plain", b"forbidden: open the panel as localhost or 127.0.0.1 (or add the name to allowedHosts in panel.json)")
         path = self.path.split("?", 1)[0]
         if path in ("/", "/index.html"):
             with open(os.path.join(HERE, INDEX), "rb") as fh:
@@ -120,11 +158,14 @@ class H(BaseHTTPRequestHandler):
             lite["taskSig"] = task_sig(raw)  # the page fetches the full feed as soon as the task list changed
             return self.send(200, "application/json", json.dumps(lite, default=str).encode())
         if path == "/api/export":  # raw log exports; same guard as writes (localhost + header) so a stray browser tab can't pull them
-            if self.headers.get("X-Dashboard") != "1" or self.client_address[0] != "127.0.0.1":
+            if not self.trusted(write=True):
                 return self.send(403, "application/json", b'{"error":"forbidden"}')
             from urllib.parse import parse_qs
             q = parse_qs(self.path.split("?", 1)[1] if "?" in self.path else "")
-            what = (q.get("what") or [""])[0]; hours = int((q.get("hours") or ["24"])[0] or 0)
+            what = (q.get("what") or [""])[0]; hours = (q.get("hours") or ["24"])[0] or "0"
+            if not hours.isdigit() or int(hours) > 24 * 366:
+                return self.send(400, "application/json", b'{"error":"hours: whole number of hours, 0 for all"}')
+            hours = int(hours)
             units = {"journal": collect.UNIT, "panel-log": "imd-panel"}
             if what in units:
                 cmd = ["journalctl", "--user", "-u", units[what], "--no-pager", "-o", "short-iso"] + (["--since", "-%dh" % hours] if hours else [])
@@ -279,7 +320,16 @@ def _release_tgz(tag):
     os.makedirs(collect.VERSIONS_DIR, exist_ok=True)
     dst = os.path.join(collect.VERSIONS_DIR, tag + ".tgz")
     if os.path.exists(dst) and os.path.getsize(dst) > 1000:
-        return dst
+        # a cached archive is reused only if it still matches the hash recorded when it was verified
+        try:
+            with open(dst + ".sha256") as fh:
+                want = fh.read().strip()
+            with open(dst, "rb") as fh:
+                if hashlib.sha256(fh.read()).hexdigest() == want:
+                    return dst
+        except OSError:
+            pass
+        os.remove(dst)  # no record or a mismatch: download and verify again
     base = f"https://github.com/{collect.WORKER_REPO}/releases/download/{tag}/"
     def get(name, limit):
         req = urllib.request.Request(base + name, headers={"User-Agent": "imd-panel/1"})
@@ -297,6 +347,8 @@ def _release_tgz(tag):
         raise ValueError("SHA-256 mismatch on the downloaded release")
     with open(dst + ".tmp", "wb") as fh:
         fh.write(blob)
+    with open(dst + ".sha256", "w") as fh:
+        fh.write(want)
     os.replace(dst + ".tmp", dst)
     return dst
 
@@ -491,6 +543,8 @@ def act_notify(body):
     for k in ("telegramToken", "telegramChatId", "webhookUrl"):
         if k in body and body[k] is not None:
             v = str(body[k]).strip()
+            if k in ("telegramToken", "webhookUrl") and v.lower() == "off":  # the page never holds these two, so "off" is how they are removed
+                v = ""
             if k == "webhookUrl" and v and not v.startswith("https://"):
                 raise ValueError("webhook must be https://")
             c[k] = v
@@ -503,7 +557,7 @@ def act_notify(body):
     if body.get("test"):
         res = notify.send("✅ imd-panel test notification from %s" % collect.HOST, c)
         if res["errors"]: raise ValueError("; ".join(res["errors"]))
-    return {"notify": {**c, "telegramToken": ("•••" + c["telegramToken"][-4:]) if c["telegramToken"] else ""}, **res}
+    return {"notify": notify.masked(c), **res}
 
 
 ACTIONS = {"/api/update": act_update, "/api/doctor": act_doctor, "/api/notify": act_notify, "/api/config": act_config, "/api/skills": act_skills, "/api/worker": act_worker, "/api/cleanup": act_cleanup, "/api/guard": act_guard}

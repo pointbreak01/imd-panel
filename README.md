@@ -189,6 +189,7 @@ Copy `panel.example.json` to `~/.config/imd-panel/panel.json` if your setup diff
 | `proxyPorts` | `[]` | local ports of a keyed RPC/API proxy you run: calls to `127.0.0.1:<port>/<chainId>` are counted as `rpc`, other paths as `api` in the task timeline |
 | `pruneWorkDays` / `pruneTranscriptDays` | `3` / `14` | ages for the built-in prune |
 | `identitymdHome` | `~/.identitymd` | where the worker keeps `config.json` and `work/` |
+| `allowedHosts` | `[]` | extra host names the panel answers to besides `localhost`, `127.0.0.1` and `[::1]` (e.g. a `tailscale serve` name); any other Host is refused |
 
 Notifications (Telegram bot or HTTPS webhook) and the budget guard are configured from the Settings tab;
 they live in `notify.json` and `guard.json` in `~/.config/imd-panel/`.
@@ -225,6 +226,19 @@ The panel binds `127.0.0.1` and has no authentication of its own: anyone who can
 machine can operate your worker. Use the SSH tunnel or a Tailscale tailnet, do not expose the port or put
 it behind a plain reverse proxy (the localhost check on write actions would then pass for everyone). Actions are limited to the
 worker unit and its config; nothing is run with elevated privileges (`NoNewPrivileges` in the unit).
+
+What the panel does on its own behalf:
+
+- It answers only to a `localhost` / `127.0.0.1` / `[::1]` Host (plus `allowedHosts`), so a web page that points its own
+  domain at 127.0.0.1 (DNS rebinding) cannot read the feed or drive the worker through your tunnel. Write actions and log
+  exports also require a same-origin `Origin` and the `X-Dashboard` header.
+- The page is served with a Content-Security-Policy: scripts only from the panel itself, requests only to the panel. Text
+  and links from the network (job titles, repositories, site names) are escaped, and only `http(s)` links are kept.
+- The Telegram token and the webhook URL never reach the page; Settings shows a hint of the saved value. Type `off` to
+  remove one.
+- Opening a task never runs code from its work dir (`git status` runs with `core.fsmonitor=false`), and artifacts that are
+  symlinks or point outside the work dir are not read.
+- A cached worker release is reinstalled only if it still matches the SHA-256 it was verified against.
 
 ## Support
 
