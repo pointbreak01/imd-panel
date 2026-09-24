@@ -511,7 +511,7 @@ section[data-tab="tasks"] .tscroll{max-height:calc(100vh - 150px)}
   <div class="wall" id="wallBox"><canvas id="wall" aria-label="the wall: one module per task, lit by what happened to it" role="img"></canvas><div class="wtip" id="wtip"></div></div>
   <div class="desk"><div class="deskScene"><canvas class="pepe" id="pepe" aria-hidden="true"></canvas><canvas class="doc" id="doc" title="the doctor: click for a check-up (imd doctor)"></canvas><a class="credit" href="https://imd.fun" target="_blank" rel="noopener">art by imd.fun · used with permission</a><div class="docdlg" id="docdlg"><div class="dh"><span id="docTitle">The doctor</span><button id="docClose">✕</button></div><div class="db" id="docBody"></div><div class="df" id="docFoot"></div></div></div></div>
 </div>
-<div class="roomcap"><span id="runInfo">…</span><span class="key"><i class="work"></i>working now</span><span class="key"><i class="ok"></i>accepted</span><span class="key"><i class="bad"></i>rejected</span><span class="key"><i class="pend"></i>pending</span><span class="key"><i></i>empty seat</span><span>Hover a module for the task, click to read it. Poke Pepe.</span></div>
+<div class="roomcap"><span id="runInfo">…</span><span class="key"><i class="work"></i>working now</span><span class="key"><i class="ok"></i>accepted</span><span class="key"><i class="bad"></i>rejected</span><span class="key"><i class="pend"></i>pending</span><span class="key"><i></i>empty seat</span><span>Hover a module for the task, click to read it. Poke Pepe.</span><span id="wallOmit"></span></div>
 
 <div class="tabs" role="tablist" id="tabs">
   <button data-tab="now" class="on">Now</button>
@@ -1051,8 +1051,11 @@ function wallLayout(){
   if(!W.canvas||!D)return;
   const el=W.canvas.parentElement;const width=el.clientWidth;if(!width)return;
   const cols=Math.max(8,Math.round(width/40));const cell=width/cols;
-  const units=wallUnits();
+  let units=wallUnits();
   const mw=Math.min(cols-2,Math.max(7,Math.round(cols*.36))),mh=4;
+  // on a phone the wall would run for screens: keep the working modules and the newest tasks that fit in ~40% of the viewport
+  let omitted=0;if(width<720){const budgetRows=Math.max(7,Math.min(11,Math.floor((innerHeight||700)*.42/cell)));let left=budgetRows*cols-mw*mh;const keep=[];for(const u of units){const a=u.w*u.h;if(u.working||a<=left){keep.push(u);left-=a}else omitted++}units=keep}
+  W.omitted=omitted;const om=document.getElementById("wallOmit");if(om)om.textContent=omitted?`${omitted} older task${omitted===1?"":"s"} not on the wall (small screen) — they are all in the Tasks tab.`:"";
   const area=units.reduce((a,u)=>a+u.w*u.h,0)+mw*mh;
   let rows=Math.max(7,Math.ceil(area/cols)+1);
   const grid=[];const free=(c,r,w,h)=>{if(c+w>cols)return false;for(let y=r;y<r+h;y++)for(let x=c;x<c+w;x++)if(grid[y]&&grid[y][x])return false;return true};
