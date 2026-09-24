@@ -44,9 +44,9 @@ If something breaks later, the same assistant with `README.md` and the failing f
 
 | tab | what is on it |
 |---|---|
-| **Now** | The room: a wall of modules, one per task in range (working / accepted / rejected / pending), a live monitor of the journal, Pepe. Below it the instrument panel: Claude 5-hour window gauge, verdict lamps, top consumers, host meters, eight counters, tokens and tasks per hour, ERC-8004 registry, your seat's server-side record, network standing (breaker, queue, presence), network health with a benchmark against the fleet, launch earnings. |
+| **Now** | The room: a wall of modules, one per task in range (working / accepted / rejected / pending), a live monitor of the journal, Pepe. Below it the instrument panel: Claude 5-hour window gauge, verdict lamps, top consumers, host meters, eight counters, tokens and tasks per hour, ERC-8004 registry, your seat's server-side record, network standing (breaker, queue, presence), network health (the three services and their builds, the control-plane commit, your rank among every seat, a benchmark against the fleet), launch earnings. |
 | **Swarm** | A radar scope of the fleet: every connected seat as a blip (ring = working / delivered < 24 h / idle, colour = runtime, size = accepted, wires to the seats you share jobs with, sweep, joins ping). Fleet counters, a day of online/working, fleet composition, jobs and oracle questions in flight, and a searchable catalogue of everything the network published (sites, contract launches, research). |
-| **Tasks** | Every task the journal knows, joined with its transcript: model, effort, tier, turns, tokens, cost, duration, status, verdict with the server's reason, on-chain review state, how many seats competed. Click a row for the ask (what the swarm asked, acceptance criteria, the pinned oracle request), the timeline with network calls flagged `rpc` / `api` / `web`, the network calls alone, and what was produced. CSV export. |
+| **Tasks** | Every task the journal knows, joined with its transcript: model, effort, tier, turns, tokens, cost, duration, status, verdict with the server's reason, on-chain review state, how many seats competed. Click a row for the ask (what the swarm asked, acceptance criteria, the pinned oracle request, the workflow the task is a stage of), the timeline with network calls flagged `rpc` / `api` / `web`, the network calls alone, and what was produced — including what the network kept: delivered repository or PR, IPFS cid, site under ENS, named output files. Research panels and fuzz campaigns get their verdict from the panel / campaign record. CSV export. |
 | **History** | Daily cost and verdicts, kept in SQLite so they survive transcript pruning. Rate-limit episodes. |
 | **Settings** | Tiers (which Claude model answers economy / standard; premium is fixed by the worker), concurrency, restart / stop, worker updates (installed build, latest GitHub release, auto-update toggle, update now, roll back to any release), budget guard, notifications, skills, what is in force, tier history. |
 | **Logs** | The worker journal in the selected range, and CSV exports of every table. |
@@ -131,8 +131,9 @@ they live in `notify.json` and `guard.json` in `~/.config/imd-panel/`.
 - `imd_panel/collect.py` joins three sources: the worker's journal (accepted / submitted / released / cancelled,
   heartbeats, updates), Claude Code transcripts in `~/.claude/projects/*identitymd-work*/` (model, effort,
   turns, tokens, cost, tools, session-limit errors), and the public control plane `api.imd.fun`
-  (seat record, submissions and verdicts, standing, health, contributors, earnings, swarm, publications,
-  the pinned inputs of a task). Tiers are resolved against an append-only log of your inference config,
+  (seat record, submissions and verdicts, standing, health, services and build, contributors, every seat's
+  record, earnings, swarm, publications, workflows, research panels, fuzz campaigns, delivered results, the
+  pinned inputs of a task). Tiers are resolved against an append-only log of your inference config,
   so a task keeps the tier it actually ran under.
 - `imd_panel/server.py` is a stdlib HTTP server: `/` is the page, `/api/data` the JSON, `/api/transcript?id=` one
   task, `/api/history` the daily rows. POST actions (config, worker, skills, doctor, guard, notify, update)

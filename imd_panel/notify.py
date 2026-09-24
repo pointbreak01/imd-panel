@@ -102,6 +102,11 @@ def check(d, guard_state):
         for l in (guard_state.get("log") or [])[-3:]:
             if l["msg"].startswith("resumed") and now - l["ts"] < 600:
                 once("guardresume:%d" % int(l["ts"]), f"▶️ <b>Worker resumed</b> at {hm(l['ts'])} ({l['msg']})")
+    # 3b. a release the daemon refused to install (bad archive, unexpected file…) — it stays on its build and retries every 5 min
+    if ev.get("worker"):
+        for h in ((d.get("updates") or {}).get("history") or [])[:6]:
+            if h.get("action") == "failed" and now - (h.get("ts") or 0) < 3 * 3600:
+                once("updfail:" + (h.get("note") or "")[:60], f"⚠️ <b>Worker update failed</b> · {h.get('note') or ''} — still on {((d.get('updates') or {}).get('installed') or {}).get('build') or '?'}", 24 * 3600)
     # 4. heartbeat / worker state
     la = d.get("lastAlive"); w = host.get("worker") or {}
     if ev.get("heartbeat") and la and now - la["ts"] > c["heartbeatMin"] * 60 and w.get("ActiveState") == "active":
