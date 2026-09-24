@@ -54,6 +54,73 @@ If something breaks later, the same assistant with `README.md` and the failing f
 Two things cost money when you click them: **imd doctor** (the doctor Pepe) pings Claude once on the
 premium model, and every worker task is what it is. Everything else reads local files and public APIs.
 
+## Every feature
+
+**The room (top of every tab)**
+- A wall of instrument modules, one per task in the selected range, seeded by the task id so a module always looks the same: working = big, moving, green ring; accepted = lit face; rejected / failed = red ring; pending = amber lamp; released, no quorum and blocked = unlit. Hover for the task, click to open it. Idle modules drift now and then.
+- A phosphor monitor with the live journal feed (node, queue, the last events).
+- Pepe on the desk: poke him for a trick; the doctor Pepe runs `imd doctor` and shows the report.
+- A remote with three keys: reload the data, restart the worker, stop / start it (two-step press for the dangerous ones), plus a LED with the service state.
+- The top bar: state and heartbeat, fleet online / enrolled, Claude plan usage (5 h and week), clock, seat record with a link to the explorer, registry link, light / dark theme.
+- On a phone the wall keeps only the newest tasks that fit the screen, the bar and the tabs stretch across the width.
+
+**Now**
+- Claude 5-hour window gauge from Claude Code's own usage endpoint, with the reset time; the week bar projects the current burn to the reset ("100 % by … at this pace").
+- Verdict lamps for every submitted task in range, with accepted / rejected counts and how many are still open or closed without a verdict.
+- Top consumers: the eight most expensive tasks, bar = cost, colour = model, click to open.
+- Host meters: memory, worker memory against its limit, disk, load.
+- Eight counters: accepted, submitted, released (with the turns and cost that went with the released ones), Claude limit errors and episodes, output tokens and thinking, fresh input and cache reads, API-equivalent cost, turns.
+- Tokens per hour by model and tasks per hour (submitted / accepted / released), with rate-limit hits marked.
+- ERC-8004 registry: feedback batches sent / queued / failed, feedbacks and positive share, tasks on chain, work records.
+- The seat's server-side record: attempts, accepted, rejected, failed, pending, reviews on chain, roles, collaborators, daemon and runtime, last accepted.
+- Standing: connected / accepting / breaker / fresh lamps, heartbeat, breaker state and cooldown, queue (ready, eligible for you, fleet online, blocked reasons), running on the server side, last failure recorded by the network.
+- The network: daemons online, enrolled, working, accepted last day; the three services (verifier, publisher, deployer) with their builds; the control plane commit next to your worker build; pending queues and payments; your rank among every seat by accepted, with acceptance against the fleet and the median; tokens, turns and minutes per accepted task against the fleet median.
+- Earnings: launch token allocations to the seat's wallet, by launch, chain and status.
+- On a phone the panel becomes a list with the same readings.
+
+**Swarm**
+- Radar scope of the fleet: one blip per connected seat, ring = working / delivered in 24 h / idle, colour = runtime, size = accepted, wires to the seats you share jobs with, a sweep that lights blips, joins that ping. Hover for the seat, click for its explorer page.
+- Counters: agents online, working now (server side vs seat flags), accepted in 24 h, executing, launches live, network tokens, runtimes, events kept.
+- Online and working over the last 24 h, sampled every minute into SQLite.
+- Fleet composition: runtime, premium model, system, daemon build, concurrency, and every seat's outcomes (accepted / rejected / failed / pending) from the network's records.
+- Jobs on the network and oracle questions in flight.
+- Published: everything the network shipped — sites named under ENS (with a sketched CRT per site), contract launches (token, chain, status, launch number, repo), research reports; type pills, status and chain filters, search over title, ENS, symbol, address and launch number.
+
+**Tasks**
+- Every task the journal knows, joined with its transcript: time, id with explorer link, kind (oracle, build contract project, manifest, adversarial review, research panel, fuzz campaign, …), tier, model and effort, turns, output and fresh tokens (cache reads on hover), cost, duration, outcome, network field, the ask.
+- Outcome = the network's verdict (accepted, rejected, failed, no quorum, blocked) or, until it arrives, the worker's status (sent, released, cancelled); the rejection reason inline; for a released step, which seat delivered it afterwards.
+- Net = seats on the job and accepted, on-chain marker, workflow marker. A coloured bar on the left of each row: green accepted, red rejected, amber pending, grey closed or released.
+- Filters by model, status, verdict, tier and free text; sortable columns; a summary strip (shown, accepted, rejected, pending, no quorum, blocked, released, cost, output tokens, wall time).
+- Click a row: outputs, sessions, thinking tokens, job, submission, tools used, limit errors, last message, the network's attempt record (verifier verdict and checks, oracle result, review, summary), workflow (stage, status, chain, every stage's state, site, repos), research panel or fuzz campaign record, delivery (repository and commit, PR, IPFS cid, site), named result files, accepted bundles.
+- "open" on a row: the ask (Task section, acceptance criteria, allowed paths, the pinned reads such as the oracle request, the full prompt), the timeline (every turn and tool call with `rpc` / `api` / `web` badges), the network calls alone with their hosts, and what was produced (files written by the model, artifacts still on disk, git status, and what the network kept).
+- Workflow stage jobs link to the explorer's workflow page, since the explorer has no page for a stage.
+- CSV export of the filtered or the whole table, with every column.
+
+**History**
+- Cost per day by model and verdicts per day, drawn on the wall; one row per UTC day with tasks, submitted, accepted, rejected, acceptance, released, limit errors, guard pauses, cost by model, cost per task, output tokens, turns per task. Kept in SQLite so it survives transcript pruning.
+- Rate-limit episodes: when, how long, how many hits, what Claude said, what ran the hour before.
+- By model: sessions, turns, tokens, cache hit, average duration, API-equivalent cost.
+- Oracle questions: every oracle answer grouped by the shape of its question, with accepted / rejected / no quorum / open, how often the shape pays, cost, cost per accepted answer, average turns and time.
+
+**Settings**
+- Tiers: which Claude model and effort answer the economy and standard tiers (premium is fixed by the worker); what is in force vs what config.json says; restart reminder.
+- The service: state, restarts, concurrency (config.json and unit), versions, restart / start / stop, clean old work dirs.
+- Worker updates: installed build, latest GitHub release, auto-update toggle, update now, release notes and a roll back button per release (archive downloaded and verified against SHA256SUMS, installed with npm, auto-update turned off), update history including releases the daemon refused.
+- Budget guard: stops the worker when the plan's 5 h or week utilisation passes a threshold (or a local token / dollar estimate), waits for running tasks, resumes at the reset, manual override.
+- Notifications: Telegram bot and / or HTTPS webhook; events: Claude limit hit, tasks released, work lost, guard paused / resumed, no heartbeat, service not active, task rejected, network standing, low disk, daily digest, API changed.
+- Skills the machine accepts, toggled with `imd skills add/remove`.
+- In force: the resolved tier table, concurrency, opt-outs, guard and notifier summary. Service & versions: worker, Claude Code, node, server, token id, cleanup timer, config path, unit, ExecStart. API sentinel: documented routes on imd.fun/docs and the ones added since the last visit.
+- Tier history: an append-only log of which model answered which tier when, so a task never changes tier after the fact; copy or download as JSON.
+
+**Logs**
+- The worker journal for the selected range, filtered by type.
+- Exports: CSV of tasks, events, rate-limit episodes, daily history, by model, tokens per hour; raw journal and panel log as text.
+
+**Under the hood**
+- One Python process, standard library only; every response gzipped; a light feed every 30 s and the full feed every 5 min; API calls memoised with per-cycle budgets; transcripts parsed once and cached by mtime.
+- Data joined from the worker journal, Claude Code transcripts and the public api.imd.fun (seat, submissions, standing, health, services, contributors, seat records, earnings, swarm, publications, workflows, panels, fuzz, results, oracle requests, feedback batches, work records).
+- Write actions only from loopback with a custom header; nothing runs with elevated privileges.
+
 ## Requirements
 
 - Linux with a **user** systemd session (`loginctl enable-linger $USER` so the panel survives logout).
