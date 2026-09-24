@@ -145,7 +145,12 @@ they live in `notify.json` and `guard.json` in `~/.config/imd-panel/`.
 - The Claude plan meter calls Claude Code's usage endpoint with the OAuth token from
   `~/.claude/.credentials.json`. The token never leaves the machine and is never shown.
 - `imd_panel/history.py` snapshots daily aggregates into `history.sqlite`; the swarm tab samples `/swarm` into
-  `swarm.sqlite` once a minute. Both live in `~/.config/imd-panel/`.
+  `swarm.sqlite` once a minute. Both live in `~/.config/imd-panel/`, next to `api-routes.json` (the API sentinel's
+  baseline: imd.fun/docs is read every 6 h and new routes are listed in Settings and sent by the notifier).
+- The page script is split into `imd_panel/assets/js/01-core.js … 07-swarm.js`; responses are gzipped, the page polls a
+  light `/api/lite` every 30 s and the full feed every 5 min. Released tasks that had already worked are summed as work
+  lost; History groups oracle answers by question shape; the week bar projects the plan's burn to the reset; on a phone the
+  Now panel becomes a list.
 
 ## Security notes
 
