@@ -645,12 +645,12 @@ section[data-tab="tasks"] .tscroll{max-height:calc(100vh - 150px)}
       <div id="nHist" style="font-size:12px"></div>
     </div>
   </div>
+  <div class="mod"><div class="lbl">06 · in force <span class="lr">read-only</span></div><div class="body" id="effTiers"></div></div>
+  <div class="mod full"><div class="lbl">07 · service &amp; versions <span class="lr">read-only</span></div><div class="body" id="effUnit"></div></div>
   <div class="mod full">
-    <div class="lbl">06 · skills</div><div class="caption"><p id="skillCap">What this machine accepts from the network. Toggling calls <code>imd skills add/remove</code>; restart after changes.</p></div>
+    <div class="lbl">08 · skills</div><div class="caption"><p id="skillCap">What this machine accepts from the network. Toggling calls <code>imd skills add/remove</code>; restart after changes.</p></div>
     <div class="body"><div class="skills" id="skills"></div><div class="msg" id="skillMsg"></div></div>
   </div>
-  <div class="mod"><div class="lbl">07 · in force <span class="lr">read-only</span></div><div class="body" id="effTiers"></div></div>
-  <div class="mod"><div class="lbl">08 · service &amp; versions <span class="lr">read-only</span></div><div class="body" id="effUnit"></div></div>
   <div class="mod full"><div class="lbl">09 · tier history</div><div class="body" id="effTierLog"></div>
     <div class="body"><div class="btns" style="margin-top:0"><button id="effCopy">copy as JSON</button><button id="effDl">download JSON</button><small>config.json itself holds the device keys: back it up with scp from your PC, not from here.</small></div><div class="msg" id="effMsg"></div></div></div>
 </div>
