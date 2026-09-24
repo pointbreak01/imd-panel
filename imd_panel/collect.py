@@ -112,7 +112,7 @@ def journal_events(rows):
         m = RE_ALIVE.match(msg)
         if m:
             running = 0 if m.group(3) == "idle" else int(m.group(4))
-            alive.append({"ts": ts, "state": m.group(1), "running": running, "submitted": int(m.group(5)),
+            alive.append({"ts": ts, "state": m.group(1), "for": m.group(2), "running": running, "submitted": int(m.group(5)),
                           "fleetOnline": int(m.group(6)) if m.group(6) else None, "fleetEnrolled": int(m.group(7)) if m.group(7) else None})
             continue
         if "rate limited" in msg:
@@ -386,10 +386,45 @@ def memo(name, ttl, fn):
     return v
 
 
+NET_RETRY = 60  # while a host is down, one real attempt per minute; every other call fails at once
+_net = {}  # host -> {"down", "since", "lastTry", "lastOk", "error"}
+
+
+def _net_mark(st, now, error=None):
+    if error:
+        if not st["down"]:
+            st["down"] = True; st["since"] = now
+        st["error"] = error
+    else:
+        st.update(down=False, since=None, error="", lastOk=now)
+
+
 def http_get(url, timeout=20):
+    """GET with a per-host circuit breaker: when api.imd.fun times out or answers 5xx, a collect() would otherwise
+    wait 20-30 s on each of its dozens of calls and the page would stay empty for minutes. The stale values the
+    callers keep are shown meanwhile, and the page is told the host is down (net_status)."""
+    host = url.split("/")[2]
+    st = _net.setdefault(host, {"down": False, "since": None, "lastTry": 0, "lastOk": None, "error": ""})
+    now = time.time()
+    if st["down"] and now - st["lastTry"] < NET_RETRY:
+        raise RuntimeError("%s unreachable (%s), next try in %d s" % (host, st["error"], NET_RETRY - (now - st["lastTry"])))
+    st["lastTry"] = now
     req = urllib.request.Request(url, headers={"User-Agent": "imd-panel/1 (+localhost)"})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return r.read().decode("utf-8", "replace")
+    try:
+        with urllib.request.urlopen(req, timeout=min(timeout, 10) if st["down"] else timeout) as r:
+            body = r.read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as e:  # the host answered: only 5xx means it is down
+        _net_mark(st, now, "HTTP %d" % e.code if e.code >= 500 else None)
+        raise
+    except (urllib.error.URLError, OSError) as e:  # timeout, refused, DNS
+        _net_mark(st, now, str(getattr(e, "reason", e))[:80] or type(e).__name__)
+        raise
+    _net_mark(st, now)
+    return body
+
+
+def net_status():
+    return {h: {k: s[k] for k in ("down", "since", "lastOk", "error")} for h, s in _net.items()}
 
 
 def read_config():
@@ -1922,6 +1957,7 @@ def collect():
     d["tierLog"] = log
     for p in PASSES:
         d = p(d) or d
+    d["net"] = net_status()
     return d
 
 
