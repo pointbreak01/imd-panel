@@ -1817,6 +1817,53 @@ def collect():
         r["kindLabel"] = src.get("kindLabel") or r.get("kindLabel"); r["workflow"] = {"id": src["workflow"].get("id"), "stage": src["workflow"].get("stage")} if src.get("workflow") else None
     return d
 
+
+# ---- oracle requests: a "pending" answer on a job the network already closed is not pending — the panel disagreed (no quorum)
+# or the job is blocked. GET /oracle/requests paged back to our oldest open submission, memoised 5 min.
+def oracle_status_fetch(oldest_iso, pages=4):
+    out = {}; before = None
+    for _ in range(pages):
+        d = api_json("/oracle/requests?limit=500" + (f"&before={before}" if before else ""), timeout=30)
+        rs = d.get("requests") or []
+        if not rs:
+            break
+        for r in rs:
+            if r.get("jobId") and r["jobId"] not in out:
+                out[r["jobId"]] = {"status": r.get("status"), "updatedAt": r.get("updatedAt"), "attestedAt": r.get("attestedAt"), "id": r.get("id")}
+        before = rs[-1].get("createdAt")
+        if not before or (oldest_iso and before < oldest_iso):
+            break
+    return {"byJob": out, "fetchedAt": time.time()}
+
+
+VERDICT_LABEL = {"noquorum": "no quorum", "blocked": "blocked"}
+_collect_v8 = collect
+
+
+def collect():
+    d = _collect_v8()
+    openq = [t for t in d.get("tasks") or [] if t.get("verdict") == "pending" and t.get("job")]
+    if openq:
+        oldest = min(t.get("submittedAt") or t.get("acceptedAt") or 0 for t in openq)
+        oldest_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(oldest - 3600)) if oldest else None
+        om = memo("oracleStatus", 300, lambda: oracle_status_fetch(oldest_iso))
+        by = om.get("byJob") if isinstance(om, dict) else {}
+        for t in openq:
+            js = (t.get("seatWork") or {}).get("jobState") or (t.get("jobInfo") or {}).get("state")
+            r = by.get(t["job"]) if by else None
+            t["oracleRequest"] = r
+            if js == "blocked" or (r or {}).get("status") == "blocked":
+                t["verdict"] = "blocked"
+                t["reason"] = {"reason": "job blocked on the network" + (" — " + str((t.get("jobInfo") or {}).get("blockedReason")) if (t.get("jobInfo") or {}).get("blockedReason") else "") + "; the answer was verified but will never be judged", "source": "api", "state": "blocked"}
+            elif r and r.get("status") == "disagreed" and js in FINAL_JOB_STATES:
+                t["verdict"] = "noquorum"
+                t["reason"] = {"reason": "no quorum — the panel never agreed on an answer, the request closed without an attestation", "source": "api", "state": "noquorum"}
+                t.setdefault("explorer", {})["word"] = "no quorum"
+    d["totals"]["noquorum"] = sum(1 for t in d["tasks"] if t.get("verdict") == "noquorum")
+    d["totals"]["blocked"] = sum(1 for t in d["tasks"] if t.get("verdict") == "blocked")
+    d["totals"]["pending"] = sum(1 for t in d["tasks"] if t.get("verdict") == "pending")
+    return d
+
 if __name__ == "__main__":
     import sys
     d = collect()
