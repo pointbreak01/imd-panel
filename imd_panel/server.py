@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """IMD worker dashboard: serves index.html and /api/data on localhost only."""
-import glob, json, os, re, shutil, subprocess, sys, threading, time
+import gzip, glob, json, os, re, shutil, subprocess, sys, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -12,6 +12,7 @@ TTL = int(os.environ.get("CACHE_TTL", "20"))
 INDEX = os.environ.get("INDEX", "index.html")  # preview a candidate page without swapping the live one
 _lock = threading.Lock()
 _cache = {"ts": 0, "body": b""}
+LITE_KEYS = ("hostName", "lastAlive", "running", "usage", "claudeProcs", "generatedAt", "collectMs", "host", "events", "standing", "quota", "rateLimits", "limitMsgs", "journalError", "totals")
 
 
 def data(force=False):
@@ -29,11 +30,18 @@ class H(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         sys.stderr.write("%s %s\n" % (self.address_string(), fmt % args))
 
-    def send(self, code, ctype, body):
+    def send(self, code, ctype, body, cache="no-store"):
+        # gzip text bodies over 2 KB when the client accepts it (the data feed is ~1.7 MB raw, ~220 KB gzipped)
+        if len(body) > 2048 and "gzip" in (self.headers.get("Accept-Encoding") or "") and ctype.split(";")[0] in ("application/json", "text/html", "text/plain", "text/javascript", "text/css", "image/svg+xml"):
+            body = gzip.compress(body, 5); enc = "gzip"
+        else:
+            enc = None
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
+        self.send_header("Cache-Control", cache)
+        if enc:
+            self.send_header("Content-Encoding", enc); self.send_header("Vary", "Accept-Encoding")
         self.end_headers()
         self.wfile.write(body)
 
@@ -66,14 +74,25 @@ class H(BaseHTTPRequestHandler):
         if path in ("/", "/index.html"):
             with open(os.path.join(HERE, INDEX), "rb") as fh:
                 return self.send(200, "text/html; charset=utf-8", fh.read())
-        if path.startswith("/assets/"):  # artwork for the room (the pepe sprite): plain files under ./assets
-            name = os.path.basename(path)
-            fp = os.path.join(HERE, "assets", name)
-            if not re.fullmatch(r"[A-Za-z0-9_.-]+", name) or not os.path.isfile(fp):
+        if path.startswith("/assets/"):  # artwork for the room (the pepe sprite) and the page's scripts: plain files under ./assets
+            rel = path[len("/assets/"):]
+            if not re.fullmatch(r"(js/)?[A-Za-z0-9_.-]+", rel):
                 return self.send(404, "text/plain", b"not found")
-            ctype = {"webp": "image/webp", "png": "image/png", "jpg": "image/jpeg", "svg": "image/svg+xml"}.get(name.rsplit(".", 1)[-1], "application/octet-stream")
+            fp = os.path.join(HERE, "assets", *rel.split("/"))
+            if not os.path.isfile(fp):
+                return self.send(404, "text/plain", b"not found")
+            ext = rel.rsplit(".", 1)[-1]
+            ctype = {"webp": "image/webp", "png": "image/png", "jpg": "image/jpeg", "svg": "image/svg+xml", "js": "text/javascript; charset=utf-8", "css": "text/css; charset=utf-8"}.get(ext, "application/octet-stream")
+            mtime = os.path.getmtime(fp); etag = '"%x-%x"' % (int(mtime), os.path.getsize(fp))
+            if ext in ("js", "css") and self.headers.get("If-None-Match") == etag:
+                self.send_response(304); self.send_header("ETag", etag); self.end_headers(); return
             with open(fp, "rb") as fh:
                 body = fh.read()
+            if ext in ("js", "css"):  # code: always revalidate, so an edit shows on the next reload
+                self.send_response(200); self.send_header("Content-Type", ctype); self.send_header("ETag", etag); self.send_header("Cache-Control", "no-cache")
+                if "gzip" in (self.headers.get("Accept-Encoding") or ""):
+                    body = gzip.compress(body, 5); self.send_header("Content-Encoding", "gzip"); self.send_header("Vary", "Accept-Encoding")
+                self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body); return
             self.send_response(200); self.send_header("Content-Type", ctype); self.send_header("Content-Length", str(len(body))); self.send_header("Cache-Control", "max-age=86400"); self.end_headers(); self.wfile.write(body)
             return
         if path == "/api/transcript":
@@ -85,6 +104,11 @@ class H(BaseHTTPRequestHandler):
             return self.send(200, "application/json", json.dumps(history.read()).encode())
         if path == "/api/data":
             return self.send(200, "application/json", data(force="refresh=1" in self.path))
+        if path == "/api/lite":  # the 30-second refresh: state, heartbeat, usage, guard and the live feed — not the 1.7 MB task list
+            data(); raw = _cache.get("raw") or {}
+            lite = {k: raw.get(k) for k in LITE_KEYS if k in raw}
+            lite["guard"] = {"config": guard_cfg(), "state": _guard_state}; lite["lite"] = True
+            return self.send(200, "application/json", json.dumps(lite, default=str).encode())
         if path == "/api/export":  # raw log exports; same guard as writes (localhost + header) so a stray browser tab can't pull them
             if self.headers.get("X-Dashboard") != "1" or self.client_address[0] != "127.0.0.1":
                 return self.send(403, "application/json", b'{"error":"forbidden"}')

@@ -234,7 +234,7 @@ def tier_of(model, effort, ts=None):
     return tiers.tier_of(model, effort, ts)
 
 
-def collect():
+def collect_base():
     t0 = time.time()
     rows, jerr = read_journal()
     _journal_rows_cache[0] = rows
@@ -642,13 +642,8 @@ def quota_window(limit_msgs, trs_sessions, now=None):
     return {"lastReset": reset, "windowStart": start, "windowEnd": start + 5 * 3600, "used": dict(used), "approx": True}
 
 
-_collect_base = collect
-
-
-def collect():
-    log = sync_tiers()  # first: _collect_base labels every task against this log
-    d = _collect_base()
-    d["tierLog"] = log
+def pass_config(d):
+    """Config, effective tiers, skills, host stats, explorer agent page."""
     cfg = memo("config", 5, read_config)
     d["config"] = cfg
     d["config"]["unitConcurrency"] = unit_concurrency()
@@ -719,11 +714,8 @@ ETHERSCAN = "https://etherscan.io"
 # ================================================================ rejection reasons + transcript viewer
 WORK = os.path.join(IDENTITYMD_HOME, "work")
 
-_collect_v3 = collect
-
-
-def collect():
-    d = _collect_v3()
+def pass_explorer(d):
+    """Explorer job pages and the running list."""
     # the explorer publishes a job page only once the job is done; while it is still executing the agent page shows
     # the job's short hash without a link — send those to the agent's pending list instead of a 404
     ex = d.get("explorer") or {}
@@ -937,10 +929,6 @@ def transcript(short_id, max_chars=400000):
                 for t in turn.get("tools", []): t["result"] = t["result"][:200]
     return out
 
-
-# ================================================================ CLI
-# Last in the file on purpose: it calls collect(), which needs every definition
-# above (including the ones in the extras section) to already exist.
 
 # ================================================================ IMD public API (imd.fun/docs) — seat, submissions, standing, network, earnings
 API = "https://api.imd.fun"
@@ -1196,11 +1184,8 @@ def reason_from_server(m):
     return None
 
 
-_collect_v4 = collect
-
-
-def collect():
-    d = _collect_v4()
+def pass_api(d):
+    """Seat record, standing, network, fleet, earnings, verdicts and reasons from api.imd.fun, registry and work records."""
     cfg = d.get("config") or {}; token = cfg.get("tokenId"); wallet = cfg.get("wallet")
     seat = memo("seat", 60, lambda: seat_fetch(token)) if token else {}
     d["seat"] = {k: v for k, v in seat.items() if k not in ("work", "reviewBySub")} if isinstance(seat, dict) else {"error": str(seat)}
@@ -1480,11 +1465,8 @@ def crew_build(token, seat, workers_by, budget):
     return rows
 
 
-_collect_v5 = collect
-
-
-def collect():
-    d = _collect_v5()
+def pass_swarm(d):
+    """The swarm: fleet, workers, recent jobs, publications, crew."""
     cfg = d.get("config") or {}; token = str(cfg.get("tokenId") or "")
     sw = memo("swarm", 30, swarm_fetch)
     wk = memo("workers", 120, workers_fetch)
@@ -1588,11 +1570,8 @@ def updates_history(rows):
     return hist[:20]
 
 
-_collect_v6 = collect
-
-
-def collect():
-    d = _collect_v6()
+def pass_updates(d):
+    """Installed worker build, GitHub releases, update history."""
     inst = memo("install", 60, worker_install)
     rel = memo("releases", 900, releases_fetch)
     releases = rel.get("releases") if isinstance(rel, dict) else None
@@ -1741,11 +1720,8 @@ def kind_label_for(nk, role, current):
     return current
 
 
-_collect_v7 = collect
-
-
-def collect():
-    d = _collect_v7()
+def pass_protocol(d):
+    """Workflows, research panels, fuzz campaigns, delivered results, services, seat records."""
     cfg = d.get("config") or {}; token = str(cfg.get("tokenId") or "")
     net = d.get("network") if isinstance(d.get("network"), dict) else None
     sv = memo("services", 120, services_fetch)
@@ -1820,7 +1796,21 @@ def collect():
 
 # ---- oracle requests: a "pending" answer on a job the network already closed is not pending — the panel disagreed (no quorum)
 # or the job is blocked. GET /oracle/requests paged back to our oldest open submission, memoised 5 min.
-def oracle_status_fetch(oldest_iso, pages=4):
+def oracle_family(q):
+    """The shape of an oracle question with the specifics removed: proper nouns, symbols, numbers, addresses — so
+    'Which address sent the most SAND on Ethereum mainnet in the last 6 hours?' groups with the APE / ENJ / RARI ones."""
+    words = (q or "").split("?")[0].split()
+    keep = []
+    for i, w in enumerate(words):
+        if i and (w[:1].isupper() or w.isupper()) and not w.lower() in ("nft", "erc-1155", "erc-20"):
+            continue
+        keep.append(w.lower())
+    s = " ".join(keep)
+    s = re.sub(r"0x[0-9a-f]{6,}", "<addr>", s); s = re.sub(r"\d[\d,.]*", "<n>", s); s = re.sub(r"\([^)]*\)", "", s); s = re.sub(r"\s+", " ", s).strip()
+    return " ".join(s.split()[:9])
+
+
+def oracle_status_fetch(oldest_iso, pages=6):
     out = {}; before = None
     for _ in range(pages):
         d = api_json("/oracle/requests?limit=500" + (f"&before={before}" if before else ""), timeout=30)
@@ -1829,7 +1819,8 @@ def oracle_status_fetch(oldest_iso, pages=4):
             break
         for r in rs:
             if r.get("jobId") and r["jobId"] not in out:
-                out[r["jobId"]] = {"status": r.get("status"), "updatedAt": r.get("updatedAt"), "attestedAt": r.get("attestedAt"), "id": r.get("id")}
+                out[r["jobId"]] = {"status": r.get("status"), "updatedAt": r.get("updatedAt"), "attestedAt": r.get("attestedAt"), "id": r.get("id"),
+                                   "chainId": r.get("chainId"), "answerType": r.get("answerType"), "question": (r.get("question") or "")[:200], "family": oracle_family(r.get("question"))}
         before = rs[-1].get("createdAt")
         if not before or (oldest_iso and before < oldest_iso):
             break
@@ -1837,17 +1828,19 @@ def oracle_status_fetch(oldest_iso, pages=4):
 
 
 VERDICT_LABEL = {"noquorum": "no quorum", "blocked": "blocked"}
-_collect_v8 = collect
-
-
-def collect():
-    d = _collect_v8()
+def pass_oracle_status(d):
+    """Oracle answers on closed requests: no quorum / blocked instead of pending; the question behind every oracle task."""
+    oracle = [t for t in d.get("tasks") or [] if t.get("job") and (t.get("kindLabel") == "oracle" or (t.get("seatWork") or {}).get("nodeKey") == "oracle_assess")]
     openq = [t for t in d.get("tasks") or [] if t.get("verdict") == "pending" and t.get("job")]
-    if openq:
-        oldest = min(t.get("submittedAt") or t.get("acceptedAt") or 0 for t in openq)
+    if oracle or openq:
+        oldest = min(t.get("submittedAt") or t.get("acceptedAt") or 0 for t in oracle + openq)
         oldest_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(oldest - 3600)) if oldest else None
         om = memo("oracleStatus", 300, lambda: oracle_status_fetch(oldest_iso))
         by = om.get("byJob") if isinstance(om, dict) else {}
+        for t in oracle:
+            r = by.get(t["job"]) if by else None
+            if r:
+                t["oracleQ"] = {k: r.get(k) for k in ("chainId", "answerType", "question", "family", "status")}
         for t in openq:
             js = (t.get("seatWork") or {}).get("jobState") or (t.get("jobInfo") or {}).get("state")
             r = by.get(t["job"]) if by else None
@@ -1862,7 +1855,68 @@ def collect():
     d["totals"]["noquorum"] = sum(1 for t in d["tasks"] if t.get("verdict") == "noquorum")
     d["totals"]["blocked"] = sum(1 for t in d["tasks"] if t.get("verdict") == "blocked")
     d["totals"]["pending"] = sum(1 for t in d["tasks"] if t.get("verdict") == "pending")
+    # work lost: tasks released on the rate limit after real work (turns, minutes, cost) — nothing was delivered
+    lost = [t for t in d["tasks"] if t.get("status") == "rate-limited" and (t.get("turns") or 0) > 0]
+    d["totals"]["wasted"] = {"tasks": len(lost), "turns": sum(t.get("turns") or 0 for t in lost), "cost": round(sum(t.get("costUSD") or 0 for t in lost), 2), "seconds": sum(t.get("durationS") or 0 for t in lost)}
     return d
+
+
+# ---- the API sentinel: imd.fun/docs lists every public route; a daily diff says when the dashboard has something new to read
+DOCS_URL = "https://imd.fun/docs/"
+API_ROUTES_FILE = state("api-routes.json")
+RE_ROUTE = re.compile(r"\b(GET|POST|PUT|DELETE|PATCH)\s+(/[A-Za-z0-9_:./?=&{}<>-]+)")
+
+
+def api_docs_fetch():
+    import html as _html
+    page = http_get(DOCS_URL, timeout=30)
+    text = _html.unescape(re.sub(r"<[^>]+>", " ", re.sub(r"<script.*?</script>", "", page, flags=re.S)))
+    routes = sorted({f"{m} {p}" for m, p in RE_ROUTE.findall(text) if not re.search(r"[A-Z]{3,}_[A-Z]+|JOB_ID|_ID\b", p)})
+    try:
+        with open(API_ROUTES_FILE) as fh:
+            known = json.load(fh)
+    except (OSError, ValueError):
+        known = {"routes": {}, "firstRun": True}
+    today = time.strftime("%Y-%m-%d", time.gmtime())
+    first = known.get("firstRun") or not known.get("routes")
+    new = [r for r in routes if r not in known["routes"]]
+    gone = [r for r in known["routes"] if r not in routes]
+    for r in new:
+        known["routes"][r] = today
+    if gone:
+        for r in gone:
+            known.setdefault("removed", {})[r] = today; known["routes"].pop(r, None)
+    known["firstRun"] = False; known["checkedAt"] = today
+    try:
+        with open(API_ROUTES_FILE, "w") as fh:
+            json.dump(known, fh, indent=1)
+    except OSError:
+        pass
+    recent = time.strftime("%Y-%m-%d", time.gmtime(time.time() - 14 * 86400))
+    return {"count": len(routes), "new": [] if first else [{"route": r, "since": today} for r in new], "recent": sorted(({"route": r, "since": dte} for r, dte in known["routes"].items() if dte >= recent and not first), key=lambda x: x["since"], reverse=True),
+            "removed": [{"route": r, "since": today} for r in gone] if not first else [], "baseline": today if first else None, "checkedAt": time.time(), "url": DOCS_URL}
+
+
+def pass_api_docs(d):
+    """Route catalogue of imd.fun/docs, diffed daily against the last visit."""
+    r = memo("apiDocs", 6 * 3600, api_docs_fetch)
+    if isinstance(d.get("network"), dict):
+        d["network"]["apiRoutes"] = r if isinstance(r, dict) else {"error": str(r)}
+    return d
+
+
+# ================================================================ the pipeline: one base pass, then every enrichment in order
+PASSES = [pass_config, pass_explorer, pass_api, pass_swarm, pass_updates, pass_protocol, pass_oracle_status, pass_api_docs]
+
+
+def collect():
+    log = sync_tiers()  # first: collect_base labels every task against this log
+    d = collect_base()
+    d["tierLog"] = log
+    for p in PASSES:
+        d = p(d) or d
+    return d
+
 
 if __name__ == "__main__":
     import sys

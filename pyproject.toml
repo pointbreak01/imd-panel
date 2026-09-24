@@ -23,4 +23,4 @@ imd-panel = "imd_panel.__main__:main"
 packages = ["imd_panel"]
 
 [tool.setuptools.package-data]
-imd_panel = ["index.html", "assets/*"]
+imd_panel = ["index.html", "assets/*", "assets/js/*"]
