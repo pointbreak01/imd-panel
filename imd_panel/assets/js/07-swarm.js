@@ -238,6 +238,6 @@ function renderPower(){
   $("#pwRestart").dataset.action="restart";document.addEventListener("click",disarm);
 })();
 load().then(()=>{const sp=new URLSearchParams(location.search),o=sp.get("open");if(sp.get("mtab"))mtab=sp.get("mtab");if(o&&D)openTranscript(o)});// every 30 s only the light feed (state, heartbeat, usage, guard, live events); the full 1.7 MB feed every 5 min or when the tab comes back
-async function loadLite(){if(!D||document.hidden)return;try{const l=await (await fetch("/api/lite")).json();delete l.lite;Object.assign(D,l);render()}catch(e){console.warn("lite refresh failed",e)}}
+async function loadLite(){if(!D||document.hidden)return;try{const l=await (await fetch("/api/lite")).json();delete l.lite;if(l.taskSig&&D.taskSig&&l.taskSig!==D.taskSig)return load(false);Object.assign(D,l);render()}catch(e){console.warn("lite refresh failed",e)}}
 setInterval(loadLite,30000);setInterval(()=>{if(!document.hidden)load(false)},300000);
 document.addEventListener("visibilitychange",()=>{if(!document.hidden&&D&&Date.now()/1000-(D.generatedAt||0)>120)load(false)});
