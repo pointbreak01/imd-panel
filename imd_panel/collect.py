@@ -1775,13 +1775,18 @@ def collect():
         if not node and len(ji.get("nodes") or []) == 1:
             node = ji["nodes"][0]
         t["jobInfo"] = {"state": ji.get("state"), "template": ji.get("template"), "blockedReason": ji.get("blockedReason"), "delivery": ji.get("delivery"), "site": ji.get("site"),
-                        "launch": ji.get("launch"), "node": node, "nodes": len(ji.get("nodes") or []), "url": ji.get("url")}
+                        "launch": ji.get("launch"), "node": node, "nodes": len(ji.get("nodes") or []), "url": ji.get("url"),
+                        # who the network's record credits for our step — another seat when we released it or lost the attempt
+                        "takenBy": (node or {}).get("seat") if node and node.get("seat") and str(node.get("seat")) != token and node.get("state") in ("accepted", "completed") else None}
         if not nk and node and node.get("key"):
             t["kindLabel"] = kind_label_for(node["key"], node.get("role"), t.get("kindLabel"))
         if ji.get("workflowId"):
             wf = _cached(_workflows, ji["workflowId"], wb, workflow_fetch)
             stage = "frontend" if wf and (wf.get("frontend") or {}).get("id") == job else "contracts" if wf and (wf.get("contracts") or {}).get("id") == job else None
             t["workflow"] = dict(wf or {"id": ji["workflowId"], "objective": ji.get("workflowObjective")}, stage=stage)
+            # the explorer has no page per stage job: a workflow lives at /jobs/<workflowId> with #contracts / #website anchors
+            t["workflow"]["explorerUrl"] = f"{EXPLORER}/jobs/{ji['workflowId']}#{'website' if stage == 'frontend' else 'contracts'}"
+            t["jobUrl"] = t["workflow"]["explorerUrl"]; t["jobPublished"] = True
         tmpl = ji.get("template") or ""
         kind = "panel" if (nk == "panel" or tmpl == "research" or (node or {}).get("key") == "panel") else "fuzz" if (nk == "campaign" or tmpl == "fuzz" or (node or {}).get("key") == "campaign") else None
         if kind:
