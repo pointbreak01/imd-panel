@@ -15,13 +15,22 @@ _cache = {"ts": 0, "body": b""}
 LITE_KEYS = ("hostName", "lastAlive", "running", "usage", "claudeProcs", "generatedAt", "collectMs", "host", "events", "standing", "quota", "rateLimits", "limitMsgs", "journalError", "totals")
 
 
+def task_sig(raw):
+    """Changes whenever a task appears, ends or gets a verdict: count + newest acceptance + running ids + verdict counts."""
+    ts = raw.get("tasks") or []
+    v = {}
+    for t in ts:
+        v[t.get("verdict") or t.get("status") or "?"] = v.get(t.get("verdict") or t.get("status") or "?", 0) + 1
+    return "%d:%s:%s:%s" % (len(ts), max((t.get("acceptedAt") or 0 for t in ts), default=0), ",".join(sorted(r.get("id", "") for r in raw.get("running") or [])), ",".join(f"{k}{n}" for k, n in sorted(v.items())))
+
+
 def data(force=False):
     with _lock:
         if force or time.time() - _cache["ts"] > TTL:
             d = collect.collect()
             _cache["raw"] = d
             _cache["ts"] = time.time()
-        d = dict(_cache["raw"]); d["guard"] = {"config": guard_cfg(), "state": _guard_state}
+        d = dict(_cache["raw"]); d["guard"] = {"config": guard_cfg(), "state": _guard_state}; d["taskSig"] = task_sig(d)
         nc = notify.cfg(); d["notify"] = {"config": {**nc, "telegramToken": ("•••" + nc["telegramToken"][-4:]) if nc.get("telegramToken") else ""}, "history": notify._hist[-10:]}
         return json.dumps(d, default=str).encode()
 
@@ -108,6 +117,7 @@ class H(BaseHTTPRequestHandler):
             data(); raw = _cache.get("raw") or {}
             lite = {k: raw.get(k) for k in LITE_KEYS if k in raw}
             lite["guard"] = {"config": guard_cfg(), "state": _guard_state}; lite["lite"] = True
+            lite["taskSig"] = task_sig(raw)  # the page fetches the full feed as soon as the task list changed
             return self.send(200, "application/json", json.dumps(lite, default=str).encode())
         if path == "/api/export":  # raw log exports; same guard as writes (localhost + header) so a stray browser tab can't pull them
             if self.headers.get("X-Dashboard") != "1" or self.client_address[0] != "127.0.0.1":
