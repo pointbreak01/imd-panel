@@ -195,10 +195,13 @@ def act_config(body):
         for tier, by_rt in inf.items():
             if tier not in ("economy", "standard", "premium") or not isinstance(by_rt, dict):
                 raise ValueError("bad tier " + str(tier))
-            if tier == "premium":  # only two states: accept (no override) or opt out
-                if by_rt != {"claude": collect.PREMIUM_OPT_OUT}:
-                    raise ValueError("premium can only be left to the worker or opted out")
-                clean["premium"] = {"claude": dict(collect.PREMIUM_OPT_OUT)}
+            if tier == "premium":  # worker default (no override), an approved premium model, or opt out
+                choice = by_rt.get("claude") if list(by_rt) == ["claude"] else None
+                if choice != collect.PREMIUM_OPT_OUT and not (
+                        isinstance(choice, dict) and set(choice) == {"model", "effort"}
+                        and collect.tiers.is_premium(choice["model"], choice["effort"])):
+                    raise ValueError("premium takes only an approved model and effort, or opt out")
+                clean["premium"] = {"claude": dict(choice)}
                 continue
             for rt, choice in by_rt.items():
                 if rt != "claude" or not isinstance(choice, dict):

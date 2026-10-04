@@ -145,7 +145,11 @@ function renderConfig(){
   const st=(inf.standard||{}).claude||{},ec=(inf.economy||{}).claude||{};
   fill("stdModel",c.allowedModels,st.model,"default");fill("stdEffort",c.allowedEffort,st.effort,"effort: default");
   fill("ecoModel",c.allowedModels,ec.model,"default");fill("ecoEffort",c.allowedEffort,ec.effort,"effort: default");
-  const pr=(inf.premium||{}).claude;if(document.activeElement!==$("#premMode"))$("#premMode").value=pr&&pr.model!==c.premiumModel?"out":"";
+  // premium: the worker default (Fable 5.1 high), an approved model+effort, or opt out (anything not approved)
+  const pr=(inf.premium||{}).claude,PA=c.premiumApproved||{},pm=$("#premMode");
+  if(document.activeElement!==pm){const cur=!pr?"":(PA[pr.model]||[]).includes(pr.effort)?pr.model+"|"+pr.effort:"out";
+    pm.innerHTML=`<option value="">default — ${mi(c.premiumModel).n} / high (worker)</option>`+Object.entries(PA).flatMap(([m,es])=>es.map(e=>`<option value="${esc(m+"|"+e)}">${mi(m).n} / ${esc(e)}</option>`)).join("")+'<option value="out">opt out — stop advertising premium</option>';
+    pm.value=cur}
   if(document.activeElement!==$("#conc"))$("#conc").value=String(c.unitConcurrency||c.maxConcurrency||2);
   if(c.unitConcurrency&&c.maxConcurrency&&c.unitConcurrency!==c.maxConcurrency)say("svcMsg",`note: unit says --concurrency ${c.unitConcurrency}, config.json says ${c.maxConcurrency}; the unit wins`);
   const S=D.skills||[];$("#skillCap").firstChild.textContent=S.length?`${S.filter(x=>x.on).length} of ${S.length} on. `:"";
@@ -155,7 +159,7 @@ function renderConfig(){
 $("#saveCfg").onclick=async()=>{const inf={};const st=$("#stdModel").value,se=$("#stdEffort").value,ec=$("#ecoModel").value,ee=$("#ecoEffort").value;
   if(st)inf.standard={claude:{model:st,...(se?{effort:se}:{})}};else if(se)return say("cfgMsg","pick a model for standard before an effort","err");
   if(ec)inf.economy={claude:{model:ec,...(ee?{effort:ee}:{})}};else if(ee)return say("cfgMsg","pick a model for economy before an effort","err");
-  if($("#premMode").value==="out")inf.premium={claude:{model:"claude-opus-5",effort:"medium"}};
+  const pv=$("#premMode").value;if(pv==="out")inf.premium={claude:{model:"claude-opus-5",effort:"medium"}};else if(pv){const[m,e]=pv.split("|");inf.premium={claude:{model:m,effort:e}}}
   say("cfgMsg","saving…");try{const r=await post("/api/config",{inference:inf,maxConcurrency:+$("#conc").value});say("cfgMsg",r.changed.length?`saved (${r.changed.join(", ")}) — restart the worker to apply`:"nothing changed","ok");load(true)}catch(e){say("cfgMsg",e.message,"err")}};
 const wact=(a,confirmTxt)=>async()=>{if(confirmTxt&&!confirm(confirmTxt))return;say("svcMsg",a+"…");try{const r=await post("/api/worker",{action:a});say("svcMsg",`worker ${r.state}`,r.state==="active"?"ok":"err");setTimeout(()=>load(true),3000)}catch(e){say("svcMsg",e.message,"err")}};
 $("#wRestart").onclick=wact("restart","Restart the worker? A task in progress is released and reassigned by the network.");

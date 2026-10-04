@@ -362,8 +362,8 @@ EXPLORER = "https://explorer.imd.fun"
 ALLOWED_MODELS = ["claude-opus-5-5", "claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5-20251001"]
 # models that take no --effort (Haiku 4.5 errors on it)
 NO_EFFORT_MODELS = {"claude-haiku-4-5-20251001"}
-# premium tier: the worker only accepts Fable 5.1 high/xhigh/max here; anything else (e.g. Opus) makes it
-# stop advertising premium capability to the server (= opt out of premium tasks)
+# premium tier: the worker accepts only tiers.PREMIUM_APPROVED here (Fable 5.1 high+, Opus 5.5 medium+);
+# anything else makes it stop advertising premium capability to the server (= opt out of premium tasks)
 PREMIUM_OPT_OUT = {"model": "claude-opus-5", "effort": "medium"}
 ALLOWED_EFFORT = ["low", "medium", "high", "xhigh", "max"]
 _slow = {}  # name -> (ts, value)
@@ -436,7 +436,7 @@ def read_config():
 
 TIER_DEFAULTS = (("standard", {"model": "claude-opus-5", "effort": "high", "note": "Claude Code default"}),
                  ("economy", {"model": "claude-sonnet-5", "effort": "low", "note": "worker default"}),
-                 ("premium", {"model": PREMIUM_MODEL, "effort": "high", "note": "fixed by the worker"}))
+                 ("premium", {"model": PREMIUM_MODEL, "effort": "high", "note": "worker default"}))
 
 
 def config_tiers(c=None):
@@ -453,7 +453,7 @@ def config_tiers(c=None):
     out = {}
     for tier, dflt in TIER_DEFAULTS:
         own = (inf.get(tier) or {}).get("claude")
-        if tier == "premium" and own and own.get("model") != PREMIUM_MODEL:
+        if tier == "premium" and own and not tiers.is_premium(own.get("model"), own.get("effort")):
             # opting out sets premium to another tier's model; it serves nothing from then on
             out[tier] = {"model": own.get("model"), "effort": own.get("effort"), "optOut": True,
                          "source": "config.json", "note": "opted out — premium not advertised"}
@@ -684,6 +684,7 @@ def pass_config(d):
     d["config"]["unitConcurrency"] = unit_concurrency()
     d["config"]["allowedModels"] = ALLOWED_MODELS; d["config"]["allowedEffort"] = ALLOWED_EFFORT; d["config"]["noEffortModels"] = sorted(NO_EFFORT_MODELS)
     d["config"]["premiumModel"] = PREMIUM_MODEL
+    d["config"]["premiumApproved"] = {m: list(e) for m, e in tiers.PREMIUM_APPROVED.items()}
     d["effective"] = memo("effective", 30, effective_config)
     d["skills"] = memo("skills", 300, skills_list)
     d["hostName"] = HOST  # "host" below is replaced by the host stats

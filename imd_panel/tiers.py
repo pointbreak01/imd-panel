@@ -20,7 +20,15 @@ TIERS = ("standard", "economy", "premium")
 # systemd reports start times to the second, so a restart the dashboard fires
 # right after writing config.json can look a fraction of a second too early.
 GRACE_S = 5
-PREMIUM_MODEL = "claude-fable-5-1"  # hard-wired in the worker (PREMIUM_MODELS); server-assigned tier
+PREMIUM_MODEL = "claude-fable-5-1"  # the worker's premium default (PREMIUM_MODELS); server-assigned tier
+# what the worker advertises as premium (APPROVED_PREMIUM_MODELS, since 8df7996c): model -> efforts.
+# any other premium override makes it stop advertising premium (= opted out)
+PREMIUM_APPROVED = {"claude-fable-5-1": ("high", "xhigh", "max"),
+                    "claude-opus-5-5": ("medium", "high", "xhigh", "max")}
+
+
+def is_premium(model, effort):
+    return effort in PREMIUM_APPROVED.get(model, ())
 
 # What ran before this log existed. effort is None = "any effort": the seed
 # cannot know which efforts were used back then, and matching on the model alone
@@ -117,7 +125,7 @@ def at(ts):
 def _fallback(model, effort):
     """Used when the snapshot cannot decide: two tiers on one model, or a model
     no tier claims (a manual run, or a tier switched without a restart)."""
-    if model == PREMIUM_MODEL and effort in ("high", "xhigh", "max"):
+    if model == PREMIUM_MODEL and is_premium(model, effort):
         return "premium"
     if model == "claude-sonnet-5":
         return "economy"
