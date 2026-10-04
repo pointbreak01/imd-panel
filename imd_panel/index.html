@@ -121,10 +121,6 @@ button.pill-cell.icon{width:calc(var(--pill-h) - 1.5px);padding:0;justify-conten
   background:linear-gradient(180deg,#0b0b0b 0,#0b0b0b 34%,#2a2a28 34%,#2a2a28 calc(34% + 2px),#0b0b0b calc(34% + 2px),#0b0b0b 46%,#d9d9d3 46%,#f1f1ec 56%,#f1f1ec 100%)}
 .desk::before{content:"";position:absolute;left:0;right:0;top:46%;bottom:0;background:repeating-linear-gradient(90deg,transparent 0 9.5%,rgba(0,0,0,.14) 9.5% calc(9.5% + 1.5px)),linear-gradient(180deg,rgba(0,0,0,.28),transparent 30%)}
 .desk::after{content:"";position:absolute;left:8%;right:8%;top:34%;height:2px;background:rgba(255,255,255,.08)}
-/* the credit: a small stencil sprayed on the floor */
-.credit{position:absolute;left:1.4%;bottom:7%;padding:3px 8px;font-size:10.5px;font-weight:700;letter-spacing:.16em;text-transform:uppercase;color:#141414;background:#ffcf5a;border:1.5px solid #141414;box-shadow:2px 2px 0 #141414;text-decoration:none;z-index:3;transform:rotate(-2deg);transform-origin:left bottom}
-.credit:hover{background:#3ecf7a;transform:rotate(0)}
-@media (max-width:720px){.credit{font-size:8px;bottom:4%;padding:2px 6px}}
 .deskScene{position:absolute;inset:0}
 .pepe{position:absolute;left:31%;bottom:5%;width:clamp(60px,9%,118px);display:block;background:transparent;border:0;padding:0;cursor:pointer;transform-origin:50% 100%;will-change:transform;z-index:4}
 .pepe:focus-visible{outline:1.5px solid #000;outline-offset:2px}
@@ -514,7 +510,7 @@ section[data-tab="tasks"] .tscroll{max-height:calc(100vh - 150px)}
 
 <div class="room" id="room">
   <div class="wall" id="wallBox"><canvas id="wall" aria-label="the wall: one module per task, lit by what happened to it" role="img"></canvas><div class="wtip" id="wtip"></div></div>
-  <div class="desk"><div class="deskScene"><canvas class="pepe" id="pepe" aria-hidden="true"></canvas><canvas class="doc" id="doc" title="the doctor: click for a check-up (imd doctor)"></canvas><a class="credit" href="https://imd.fun" target="_blank" rel="noopener">art by imd.fun · used with permission</a><div class="docdlg" id="docdlg"><div class="dh"><span id="docTitle">The doctor</span><button id="docClose">✕</button></div><div class="db" id="docBody"></div><div class="df" id="docFoot"></div></div></div></div>
+  <div class="desk"><div class="deskScene"><canvas class="pepe" id="pepe" aria-hidden="true"></canvas><canvas class="doc" id="doc" title="the doctor: click for a check-up (imd doctor)"></canvas><div class="docdlg" id="docdlg"><div class="dh"><span id="docTitle">The doctor</span><button id="docClose">✕</button></div><div class="db" id="docBody"></div><div class="df" id="docFoot"></div></div></div></div>
 </div>
 <div class="roomcap"><span id="runInfo">…</span><span class="key"><i class="work"></i>working now</span><span class="key"><i class="ok"></i>accepted</span><span class="key"><i class="bad"></i>rejected</span><span class="key"><i class="pend"></i>pending</span><span class="key"><i></i>empty seat</span><span>Hover a module for the task, click to read it. Poke Pepe.</span><span id="wallOmit"></span></div>
 
@@ -660,6 +656,7 @@ section[data-tab="tasks"] .tscroll{max-height:calc(100vh - 150px)}
     <div class="lbl">08 · skills</div><div class="caption"><p id="skillCap">What this machine accepts from the network. Toggling calls <code>imd skills add/remove</code>; restart after changes.</p></div>
     <div class="body"><div class="skills" id="skills"></div><div class="msg" id="skillMsg"></div></div>
   </div>
+  <div class="mod full"><div class="lbl">10 · image tool <span class="lr" id="imgInfo"></span></div><div class="caption"><p>The <code>image</code> tool from <code>imd tools</code> (skill <code>create-image</code>): imd-image-tool on OpenRouter. Read-only: what it generated, what it cost, how much of today's limit is left. The key itself is never read.</p></div><div class="body" id="imgTool"></div></div>
   <div class="mod full"><div class="lbl">09 · tier history</div><div class="body" id="effTierLog"></div>
     <div class="body"><div class="btns" style="margin-top:0"><button id="effCopy">copy as JSON</button><button id="effDl">download JSON</button><small>config.json itself holds the device keys: back it up with scp from your PC, not from here.</small></div><div class="msg" id="effMsg"></div></div></div>
 </div>

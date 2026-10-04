@@ -54,7 +54,7 @@ function render(){
   else if(D.journalError){b.style.display="block";b.className="banner lamp";b.textContent="journal unavailable: "+D.journalError}else b.style.display="none";
   renderNet(la,disc);
   const al=$("#agentLink");if(D.explorer&&D.explorer.agentUrl){al.href=D.explorer.agentUrl;const a=D.explorer.agent;al.textContent=a?`#${D.explorer.tokenId} · ${a.accepted}/${a.attempts} ↗`:`#${D.explorer.tokenId} ↗`;al.title=a?`agent #${D.explorer.tokenId} on the explorer · ${a.accepted} of ${a.attempts} attempts accepted`:"agent page on the explorer"}
-  renderDaily();renderRunning();renderPanel();renderPower();renderGuard();renderNotify();renderEpisodes();renderByModel();fillFilters();renderTasks();renderFeed();renderConfig();renderService();renderEffective();renderTierLog();syncScroll();
+  renderDaily();renderRunning();renderPanel();renderPower();renderGuard();renderNotify();renderEpisodes();renderByModel();fillFilters();renderTasks();renderFeed();renderConfig();renderService();renderEffective();renderTierLog();renderMedia();syncScroll();
 }
 // network banner: a host the panel reads from is down (circuit breaker in collect.http_get) and/or the worker says it is disconnected
 function renderNet(la,disc){
@@ -302,6 +302,22 @@ function renderTierLog(){
     `</table></div><div class="muted" style="font-size:11px;margin-top:6px">a snapshot is recorded once the worker has restarted onto it${L.workerStartedAt?` · worker started ${dt(L.workerStartedAt)}`:""}</div>`;
 }
 
+function renderMedia(){
+  const el=$("#imgTool");if(!el)return;const M=D.media||{};
+  if(M.error){el.innerHTML=`<span class="muted">${esc(M.error)}</span>`;return}
+  const T=(M.tools||[]).find(t=>t.id==="image"),I=M.image||{};
+  if(!T){$("#imgInfo").textContent="not configured";el.innerHTML='<span class="muted">no <code>image</code> tool declared in tools.json — see Projects/imd/imd-image-tool/README.md</span>';return}
+  const ready=!T.missing.length,left=Math.max(0,(I.dailyLimit||0)-(I.today||0));
+  $("#imgInfo").textContent=`${I.total||0} images · ${usd(I.totalCost)} all time`;
+  const cost=v=>v?"$"+v.toFixed(v<0.1?4:2):"–";
+  el.innerHTML=`<div class="form"><span>tool</span><span><span class="tag ${ready?"ok":"alarm"}">${ready?"ready":"missing "+esc(T.missing.join(", "))}</span> ${esc(T.enabled.join(", "))} · <span class="muted">${esc(T.command)}</span></span>`+
+    `<span>model</span><span>${esc(I.model||"?")}</span>`+
+    `<span>today (utc)</span><span><b>${I.today||0}</b> of ${I.dailyLimit||"?"} · ${cost(I.todayCost)} · ${left} left</span>`+
+    `<span>all time</span><span><b>${I.total||0}</b> images · ${cost(I.totalCost)}${I.errors?` · <span style="color:var(--alarm)">${I.errors} failed call(s)</span>`:""} · ${I.tasks||0} task(s) in the journal called it</span></div>`+
+    ((I.days||[]).length?`<div class="tscroll"><table><tr><th>day</th><th>images</th><th>failed</th><th>cost</th></tr>`+(I.days||[]).slice().reverse().map(x=>`<tr><td>${esc(x.day)}</td><td>${x.ok}</td><td>${x.errors||""}</td><td>${cost(x.cost)}</td></tr>`).join("")+"</table></div>":"")+
+    ((I.recent||[]).length?`<div class="tscroll"><table class="wide"><tr><th>when (UTC)</th><th></th><th>cost</th><th>file</th><th>prompt / error</th></tr>`+I.recent.map(x=>`<tr><td>${x.ts?dt(x.ts):"?"}</td><td><span class="tag ${x.status==="ok"?"ok":"alarm"}">${esc(x.status)}</span></td><td>${cost(x.cost)}</td><td>${x.job?`<a href="https://explorer.imd.fun/jobs/${encodeURIComponent(x.job)}" target="_blank" rel="noopener">${esc(x.path||x.job)}</a>`:esc(x.path||"")}</td><td title="${esc(x.prompt||x.error||"")}">${esc((x.prompt||x.error||"").slice(0,110))}</td></tr>`).join("")+"</table></div>"
+      :`<p class="muted">${I.logPresent?"no calls logged":"no image generated yet: the log appears with the first call"}.</p>`);
+}
 function renderEffective(){
   const e=D.effective||{},t=e.tiers||{},u=e.unit||{},v=e.versions||{},g=(D.guard||{}).config||{},n=(D.notify||{}).config||{},h=(D.host||{}).timer||{};
   const row=(k,val,src)=>`<span>${k}</span><span>${val}${src?`<span class="src">${src}</span>`:""}</span>`;

@@ -1948,8 +1948,74 @@ def pass_api_docs(d):
     return d
 
 
+# ================================================================ media tools: what `imd tools` declares + imd-image-tool's call log
+TOOLS_FILE = os.path.join(IDENTITYMD_HOME, "tools.json")
+TOOLS_ENV = os.path.join(IDENTITYMD_HOME, "tools.env")
+IMAGE_LOG = os.path.join(HOME, ".local", "state", "imd-image-tool", "images.jsonl")
+IMAGE_CFG = os.path.join(HOME, ".config", "imd-image-tool", "config.json")
+IMAGE_DEFAULTS = {"model": "openai/gpt-image-2", "dailyLimit": 20}
+
+
+def media_fetch():
+    """Declared tools (names only: the values in tools.env never leave this function) and the image log."""
+    try:
+        with open(TOOLS_FILE) as fh:
+            declared = json.load(fh)
+    except (OSError, ValueError):
+        declared = []
+    try:
+        with open(TOOLS_ENV) as fh:
+            stored = {l.split("=", 1)[0].strip() for l in fh if "=" in l and not l.lstrip().startswith("#")}
+    except OSError:
+        stored = set()
+    tools_out = [{"id": t.get("id"), "command": " ".join([t.get("command") or ""] + (t.get("args") or [])),
+                  "enabled": t.get("enabledTools") or [], "envVars": t.get("envVars") or [],
+                  "missing": [v for v in t.get("envVars") or [] if v not in stored and not os.environ.get(v)]} for t in declared]
+    try:
+        with open(IMAGE_CFG) as fh:
+            cfg = {**IMAGE_DEFAULTS, **json.load(fh)}
+    except (OSError, ValueError):
+        cfg = dict(IMAGE_DEFAULTS)
+    entries = []
+    try:
+        with open(IMAGE_LOG) as fh:
+            for line in fh:
+                try:
+                    e = json.loads(line)
+                except ValueError:
+                    continue
+                e["ts"] = parse_ts(e.get("ts")) if isinstance(e.get("ts"), str) else e.get("ts")
+                e["job"] = (e.get("path") or e.get("cwd") or "").split("/")[0] or None
+                entries.append(e)
+    except OSError:
+        pass
+    days = defaultdict(lambda: {"ok": 0, "errors": 0, "cost": 0.0})
+    for e in entries:
+        day = datetime.fromtimestamp(e["ts"] or 0, timezone.utc).strftime("%Y-%m-%d")
+        if e.get("status") == "ok":
+            days[day]["ok"] += 1; days[day]["cost"] += e.get("cost") or 0
+        else:
+            days[day]["errors"] += 1
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    ok = [e for e in entries if e.get("status") == "ok"]
+    return {"tools": tools_out, "image": {"model": cfg["model"], "dailyLimit": cfg["dailyLimit"], "logPresent": os.path.exists(IMAGE_LOG),
+            "today": days[today]["ok"] if today in days else 0, "todayCost": round(days[today]["cost"], 4) if today in days else 0,
+            "total": len(ok), "totalCost": round(sum(e.get("cost") or 0 for e in ok), 4), "errors": len(entries) - len(ok),
+            "days": [{"day": k, **v, "cost": round(v["cost"], 4)} for k, v in sorted(days.items())[-14:]],
+            "recent": entries[-15:][::-1]}}
+
+
+def pass_media(d):
+    m = memo("media", 30, media_fetch)
+    if isinstance(m, dict) and "image" in m:
+        # tasks that called the image tool (the tool counts per task come from the transcripts)
+        m["image"]["tasks"] = sum(1 for t in d.get("tasks", []) if any(k.startswith("mcp__image__") for k in (t.get("tools") or {})))
+    d["media"] = m
+    return d
+
+
 # ================================================================ the pipeline: one base pass, then every enrichment in order
-PASSES = [pass_config, pass_explorer, pass_api, pass_swarm, pass_updates, pass_protocol, pass_oracle_status, pass_api_docs]
+PASSES = [pass_config, pass_explorer, pass_api, pass_swarm, pass_updates, pass_protocol, pass_oracle_status, pass_api_docs, pass_media]
 
 
 def collect():
