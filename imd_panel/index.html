@@ -593,7 +593,8 @@ section[data-tab="tasks"] .tscroll{max-height:calc(100vh - 150px)}
       <div class="tierrow"><span class="name">economy</span><span class="sel"><select id="ecoModel"></select><select id="ecoEffort"></select></span><span class="now" id="ecoNow"></span></div>
       <div class="tierrow"><span class="name">standard</span><span class="sel"><select id="stdModel"></select><select id="stdEffort"></select></span><span class="now" id="stdNow"></span></div>
       <div class="tierrow"><span class="name">premium</span><span class="sel"><select id="premMode"></select></span><span class="now" id="premNow"></span></div>
-      <div class="btns"><button id="saveCfg" class="primary">save tiers</button><small>empty = worker default (economy: Sonnet 5 low; standard: Claude Code default; premium: Fable 5.1 high). Opus 5.5 defaults to medium. Premium takes only the models the worker approves (Opus 5.5 from medium, since build 8df7996c).</small></div>
+      <div class="muted" id="premSmart" style="font-size:12px;margin:-2px 0 6px"></div>
+      <div class="btns"><button id="saveCfg" class="primary">save tiers</button><small>empty = worker default (economy: Sonnet 5 low; standard: Claude Code default; premium: Fable 5.1 high). Opus 5.5 defaults to medium. Premium takes only the models the worker approves (Opus 5.5 from medium, since build 8df7996c). Smart: Fable until its weekly limit runs out, then the fallback until the reset; the panel restarts the worker between tasks (at most 30 min wait).</small></div>
       <div class="msg" id="cfgMsg"></div>
     </div>
   </div>

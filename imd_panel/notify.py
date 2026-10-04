@@ -119,6 +119,10 @@ def check(d, guard_state):
         for l in (guard_state.get("log") or [])[-3:]:
             if l["msg"].startswith("resumed") and now - l["ts"] < 600:
                 once("guardresume:%d" % int(l["ts"]), f"▶️ <b>Worker resumed</b> at {hm(l['ts'])} ({l['msg']})")
+    if ev.get("guard"):  # smart premium switches (logged by the guard loop)
+        for l in (guard_state.get("log") or [])[-5:]:
+            if l["msg"].startswith("smart premium: ") and "→" in l["msg"] and now - l["ts"] < 600:
+                once("smart:%d" % int(l["ts"]), f"🔀 <b>Premium switched</b> at {hm(l['ts'])}\n{l['msg'][15:]}", 10 ** 9)
     # 3b. a release the daemon refused to install (bad archive, unexpected file…) — it stays on its build and retries every 5 min
     if ev.get("worker"):
         for h in ((d.get("updates") or {}).get("history") or [])[:6]:

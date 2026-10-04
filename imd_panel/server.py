@@ -36,6 +36,7 @@ def data(force=False):
             _cache["raw"] = d
             _cache["ts"] = time.time()
         d = dict(_cache["raw"]); d["guard"] = {"config": guard_cfg(), "state": _guard_state}; d["taskSig"] = task_sig(d)
+        d["smart"] = {"config": smart_cfg(), "state": _smart_state}
         d["notify"] = {"config": notify.masked(notify.cfg()), "history": notify._hist[-10:]}
         return json.dumps(d, default=str).encode()
 
@@ -155,6 +156,7 @@ class H(BaseHTTPRequestHandler):
             data(); raw = _cache.get("raw") or {}
             lite = {k: raw.get(k) for k in LITE_KEYS if k in raw}
             lite["guard"] = {"config": guard_cfg(), "state": _guard_state}; lite["lite"] = True
+            lite["smart"] = {"config": smart_cfg(), "state": _smart_state}
             lite["taskSig"] = task_sig(raw)  # the page fetches the full feed as soon as the task list changed
             return self.send(200, "application/json", json.dumps(lite, default=str).encode())
         if path == "/api/export":  # raw log exports; same guard as writes (localhost + header) so a stray browser tab can't pull them
@@ -189,6 +191,9 @@ def act_config(body):
     with open(collect.CONFIG) as fh:
         cfg = json.load(fh)
     changed = []
+    smart = body.get("premiumSmart")
+    if smart is not None and bool(smart) != smart_cfg()["enabled"]:
+        save_smart(enabled=bool(smart)); changed.append("smart")
     if "inference" in body:
         inf = body["inference"] or {}
         clean = {}
@@ -214,6 +219,8 @@ def act_config(body):
                 if effort and model in collect.NO_EFFORT_MODELS:
                     raise ValueError(model + " takes no effort setting")
                 clean.setdefault(tier, {})[rt] = {"model": model, **({"effort": effort} if effort else {})}
+        if smart and (cfg.get("inference") or {}).get("premium"):
+            clean["premium"] = cfg["inference"]["premium"]  # smart mode owns premium from here on
         if clean != cfg.get("inference", {}):
             cfg["inference"] = clean; changed.append("inference")
     if "maxConcurrency" in body:
@@ -230,11 +237,17 @@ def act_config(body):
                 fh.write(new)
             run(["systemctl", "--user", "daemon-reload"]); changed.append("unit")
     if "inference" in changed or "maxConcurrency" in changed:
-        tmp = collect.CONFIG + ".tmp"
-        with open(tmp, "w") as fh:
-            json.dump(cfg, fh, indent=2)
-        os.chmod(tmp, 0o600); os.replace(tmp, collect.CONFIG)
-    return {"changed": changed, "restartNeeded": bool(changed)}
+        write_config(cfg)
+    if smart:
+        threading.Thread(target=lambda: smart_tick(json.loads(data())), daemon=True).start()
+    return {"changed": changed, "restartNeeded": bool(set(changed) - {"smart"})}
+
+
+def write_config(cfg):
+    tmp = collect.CONFIG + ".tmp"
+    with open(tmp, "w") as fh:
+        json.dump(cfg, fh, indent=2)
+    os.chmod(tmp, 0o600); os.replace(tmp, collect.CONFIG)
 
 
 def act_skills(body):
@@ -498,6 +511,10 @@ def guard_loop():
         except Exception as e:
             guard_log("error: %s" % str(e)[:200])
         try:
+            smart_tick(json.loads(data()))
+        except Exception as e:
+            guard_log("smart premium error: %s" % str(e)[:200])
+        try:
             notify.check(json.loads(data()), _guard_state)
         except Exception as e:
             sys.stderr.write("notify error: %s\n" % str(e)[:200])
@@ -518,6 +535,99 @@ def guard_loop():
 
 _last_snap = [0]
 _last_prune = [time.time()]  # first prune a day after start, not at boot
+
+
+# ---------------------------------------------------------------- smart premium: Fable while its weekly limit lasts, a fallback after
+# Claude's usage endpoint reports the Fable-only weekly meter as `weekly_scoped` (100% / active while
+# every Fable run ends in "You've reached your Fable limit"). Each such bounce costs the worker 5 minutes
+# of intake, so once Fable is out the premium tier moves to the fallback, and back at the meter's reset.
+SMART_FILE = state("smart.json")
+SMART_DEFAULT = {"enabled": False, "fallback": {"model": "claude-opus-5-5", "effort": "high"}, "maxWaitMin": 30, "backAfter": None}
+RE_FABLE_LIMIT = re.compile(r"fable.{0,20}limit", re.I)
+_smart_lock = threading.Lock()
+_smart_state = {"mode": None, "reason": "", "fableOut": None, "fablePct": None, "fableResetsAt": None,
+                "restartPendingSince": None, "pending": None, "lastCheck": None}
+
+
+def smart_cfg():
+    try:
+        with open(SMART_FILE) as fh:
+            s = {**SMART_DEFAULT, **json.load(fh)}
+    except (OSError, ValueError):
+        s = dict(SMART_DEFAULT)
+    fb = s.get("fallback") or {}
+    if not collect.tiers.is_premium(fb.get("model"), fb.get("effort")):
+        s["fallback"] = dict(SMART_DEFAULT["fallback"])  # a fallback the worker would not advertise is no fallback
+    return s
+
+
+def save_smart(**kw):
+    s = {**smart_cfg(), **kw}
+    tmp = SMART_FILE + ".tmp"
+    with open(tmp, "w") as fh: json.dump(s, fh, indent=2)
+    os.replace(tmp, SMART_FILE)
+    return s
+
+
+def smart_tick(d):
+    with _smart_lock:
+        _smart_tick(d)
+
+
+def _smart_tick(d):
+    s = smart_cfg(); now = time.time(); st = _smart_state; st["lastCheck"] = now
+    if not s["enabled"]:
+        st.update(mode=None, reason="", restartPendingSince=None, pending=None)
+        return
+    with open(collect.CONFIG) as fh:
+        cfg = json.load(fh)
+    cur = ((cfg.get("inference") or {}).get("premium") or {}).get("claude")
+    on_fallback = bool(cur) and cur.get("model") != collect.PREMIUM_MODEL
+    u = d.get("usage") or {}
+    scoped = next((l for l in u.get("limits") or [] if l.get("kind") == "weekly_scoped"), None)
+    out = bool(scoped) and (bool(scoped.get("active")) or (scoped.get("pct") or 0) >= 100)
+    st.update(fableOut=out if scoped else None, fablePct=scoped.get("pct") if scoped else None, fableResetsAt=scoped.get("resetsAt") if scoped else None)
+    started = collect.memo("worker-start", 30, collect.unit_started_at)
+    started = started if isinstance(started, float) else None
+    bounced = [l for l in d.get("limitMsgs") or [] if RE_FABLE_LIMIT.search(l.get("msg") or "")
+               and now - l["ts"] < 1800 and (started is None or l["ts"] > started)]
+    want = None
+    if not on_fallback and (out or bounced):
+        want = "fallback"
+        why = "Fable weekly limit at %s%%" % scoped.get("pct") if out else "Fable limit hit by the worker"
+        # back to Fable at the meter's reset; a bounce the meter does not show is retried in an hour
+        back = scoped["resetsAt"] if out and (scoped.get("resetsAt") or 0) > now else now + 3600
+        save_smart(backAfter=back)
+    elif on_fallback and scoped and not out and now >= (s.get("backAfter") or 0) and (u.get("fetchedAt") or 0) >= (s.get("backAfter") or 0):
+        want = "fable"; why = "Fable weekly limit reset (%s%%)" % scoped.get("pct")
+        save_smart(backAfter=None)
+    if want:
+        inf = cfg.setdefault("inference", {})
+        if want == "fallback":
+            inf["premium"] = {"claude": dict(s["fallback"])}
+        else:
+            inf.pop("premium", None)
+        write_config(cfg)
+        label = "%s / %s" % (s["fallback"]["model"], s["fallback"]["effort"]) if want == "fallback" else "Fable 5.1 (worker default)"
+        guard_log("smart premium: %s → %s" % (why, label))
+        st.update(reason=why, restartPendingSince=now)
+        on_fallback = want == "fallback"
+    st["mode"] = "fallback" if on_fallback else "fable"
+    # the worker reads config.json only at start: restart it into the new premium, between tasks if possible
+    since = st.get("restartPendingSince")
+    if not since:
+        return
+    if started and started > since:  # restarted meanwhile (auto-update, by hand, the guard)
+        st.update(restartPendingSince=None, pending=None); return
+    if worker_state() != "active":  # stopped (the guard, by hand): it starts on the new config anyway
+        st.update(restartPendingSince=None, pending=None); return
+    running = len(d.get("running") or [])
+    if running and now - since < s["maxWaitMin"] * 60:
+        st["pending"] = "restart waiting for %d running task(s)" % running
+        return
+    run(["systemctl", "--user", "restart", collect.UNIT])
+    guard_log("smart premium: worker restarted onto the new premium%s" % (" (%d task(s) released after %d min)" % (running, s["maxWaitMin"]) if running else ""))
+    st.update(restartPendingSince=None, pending=None)
 
 
 def act_guard(body):
