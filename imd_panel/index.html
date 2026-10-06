@@ -702,6 +702,7 @@ section[data-tab="tasks"] .tscroll{max-height:calc(100vh - 150px)}
   <div class="mod full"><div class="lbl">10 · image tool <span class="lr" id="imgInfo"></span></div><div class="caption"><p>The <code>image</code> tool from <code>imd tools</code> (skill <code>create-image</code>): imd-image-tool on OpenRouter. Read-only: what it generated, what it cost, how much of today's limit is left. The key itself is never read.</p></div><div class="body" id="imgTool"></div></div>
   <div class="mod full"><div class="lbl">09 · tier history</div><div class="body" id="effTierLog"></div>
     <div class="body"><div class="btns" style="margin-top:0"><button id="effCopy">copy as JSON</button><button id="effDl">download JSON</button><small>config.json itself holds the device keys: back it up with scp from your PC, not from here.</small></div><div class="msg" id="effMsg"></div></div></div>
+  <div class="mod full"><div class="lbl">11 · api traffic <span class="lr" id="trafInfo"></span></div><div class="caption"><p>Every request the panel made to api.imd.fun and the other public services since it started, by endpoint: calls, bytes over the wire (gzip) and once unpacked, time. While no page is open the panel keeps reading only what the guard, the notifier and the history need; the swarm, publications, registry and job details wait until you look.</p></div><div class="paper tscroll" style="max-height:50vh"><table id="traffic" class="wide"></table></div></div>
 </div>
 </section>
 

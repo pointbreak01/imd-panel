@@ -54,7 +54,7 @@ function render(){
   else if(D.journalError){b.style.display="block";b.className="banner lamp";b.textContent="journal unavailable: "+D.journalError}else b.style.display="none";
   renderNet(la,disc);
   const al=$("#agentLink");if(D.explorer&&D.explorer.agentUrl){al.href=D.explorer.agentUrl;const a=D.explorer.agent;al.textContent=a?`#${D.explorer.tokenId} · ${a.accepted}/${a.attempts} ↗`:`#${D.explorer.tokenId} ↗`;al.title=a?`agent #${D.explorer.tokenId} on the explorer · ${a.accepted} of ${a.attempts} attempts accepted`:"agent page on the explorer"}
-  renderDaily();renderRunning();renderPanel();renderPower();renderGuard();renderNotify();renderEpisodes();renderByModel();fillFilters();renderTasks();renderFeed();renderConfig();renderService();renderEffective();renderTierLog();renderMedia();syncScroll();
+  renderDaily();renderRunning();renderPanel();renderPower();renderGuard();renderNotify();renderEpisodes();renderByModel();fillFilters();renderTasks();renderFeed();renderConfig();renderService();renderEffective();renderTierLog();renderMedia();renderTraffic();syncScroll();
 }
 // network banner: a host the panel reads from is down (circuit breaker in collect.http_get) and/or the worker says it is disconnected
 function renderNet(la,disc){
@@ -317,6 +317,12 @@ function renderMedia(){
     ((I.days||[]).length?`<div class="tscroll"><table><tr><th>day</th><th>images</th><th>failed</th><th>cost</th></tr>`+(I.days||[]).slice().reverse().map(x=>`<tr><td>${esc(x.day)}</td><td>${x.ok}</td><td>${x.errors||""}</td><td>${cost(x.cost)}</td></tr>`).join("")+"</table></div>":"")+
     ((I.recent||[]).length?`<div class="tscroll"><table class="wide"><tr><th>when (UTC)</th><th></th><th>cost</th><th>file</th><th>prompt / error</th></tr>`+I.recent.map(x=>`<tr><td>${x.ts?dt(x.ts):"?"}</td><td><span class="tag ${x.status==="ok"?"ok":"alarm"}">${esc(x.status)}</span></td><td>${cost(x.cost)}</td><td>${x.job?`<a href="https://explorer.imd.fun/jobs/${encodeURIComponent(x.job)}" target="_blank" rel="noopener">${esc(x.path||x.job)}</a>`:esc(x.path||"")}</td><td title="${esc(x.prompt||x.error||"")}">${esc((x.prompt||x.error||"").slice(0,110))}</td></tr>`).join("")+"</table></div>"
       :`<p class="muted">${I.logPresent?"no calls logged":"no image generated yet: the log appears with the first call"}.</p>`);
+}
+function renderTraffic(){
+  const el=$("#traffic"),T=D.traffic;if(!el||!T)return;const h=Math.max(1/60,(Date.now()/1000-T.since)/3600),kb=n=>n>=1048576?(n/1048576).toFixed(1)+" MB":(n/1024).toFixed(0)+" kB";
+  $("#trafInfo").textContent=`since ${dt(T.since)} UTC · ${fmt(T.calls)} calls · ${kb(T.wire)} on the wire (${kb(T.raw)} unpacked) · ${kb(T.wire/h*24)}/day at this pace · ${T.watched?"page open":"nobody looking"}`;
+  el.innerHTML=`<tr><th>endpoint</th><th class="num">calls</th><th class="num">per hour</th><th class="num">wire</th><th class="num">unpacked</th><th class="num">avg</th><th class="num">errors</th><th>last</th></tr>`+
+    T.rows.map(r=>`<tr><td>${esc(r.route)}</td><td class="num">${r.calls}</td><td class="num">${(r.calls/h).toFixed(1)}</td><td class="num">${kb(r.wire)}</td><td class="num">${kb(r.raw)}</td><td class="num">${r.calls?Math.round(r.ms/r.calls)+" ms":"–"}</td><td class="num">${r.errors||'<span class="z">0</span>'}</td><td>${r.last?hm(r.last):""}</td></tr>`).join("");
 }
 function renderEffective(){
   const e=D.effective||{},t=e.tiers||{},u=e.unit||{},v=e.versions||{},g=(D.guard||{}).config||{},n=(D.notify||{}).config||{},h=(D.host||{}).timer||{};

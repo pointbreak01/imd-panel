@@ -2,7 +2,7 @@
 """Collect IMD worker activity: journal events + Claude Code transcripts -> one JSON."""
 import urllib.request
 import datetime as _dt
-import glob, json, os, re, subprocess, time
+import glob, gzip, json, os, re, subprocess, time
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 
@@ -369,9 +369,22 @@ ALLOWED_EFFORT = ["low", "medium", "high", "xhigh", "max"]
 _slow = {}  # name -> (ts, value)
 
 
-def memo(name, ttl, fn):
+# Nobody looking: the panel keeps collecting every 30 s for the guard, the notifier and the history, but what only the
+# page shows (the swarm, publications, registry, job details) can wait. server.py stamps every page request here.
+WATCH_WINDOW = 600
+_viewed = [0.0]
+
+
+def watched():
+    return time.time() - _viewed[0] < WATCH_WINDOW
+
+
+def memo(name, ttl, fn, idle=None):
+    """Cache fn() for ttl seconds — or for idle seconds while no page is open (display-only data)."""
     now = time.time()
     hit = _slow.get(name)
+    if idle and not watched():
+        ttl = max(ttl, idle)
     if hit and now - hit[0] < ttl:
         return hit[1]
     try:
@@ -388,6 +401,30 @@ def memo(name, ttl, fn):
 
 NET_RETRY = 60  # while a host is down, one real attempt per minute; every other call fails at once
 _net = {}  # host -> {"down", "since", "lastTry", "lastOk", "error"}
+_traffic = {}  # "host/route" -> calls, errors, wire / raw bytes, ms since the panel started
+_traffic_since = time.time()
+RE_ROUTE_ID = re.compile(r"/(0x[0-9a-fA-F]+|[0-9a-f]{8}-[0-9a-f-]{27}|\d+)(?=/|$|\.)")
+
+
+def _route(url):
+    """https://api.imd.fun/seats/42?work=1000 -> api.imd.fun/seats/:id?work — one row per endpoint and query shape."""
+    parts = url.split("/", 3)
+    path, _, q = ("/" + (parts[3] if len(parts) > 3 else "")).partition("?")
+    path = RE_ROUTE_ID.sub("/:id", path)
+    keys = sorted({kv.split("=", 1)[0] for kv in q.split("&") if kv})
+    return parts[2] + path + ("?" + "&".join(keys) if keys else "")
+
+
+def _count(url, t0, wire=0, raw=0, error=False):
+    r = _traffic.setdefault(_route(url), {"calls": 0, "errors": 0, "wire": 0, "raw": 0, "ms": 0, "last": 0})
+    r["calls"] += 1; r["errors"] += 1 if error else 0; r["wire"] += wire; r["raw"] += raw
+    r["ms"] += int((time.time() - t0) * 1000); r["last"] = time.time()
+
+
+def traffic():
+    rows = sorted(({"route": k, **v} for k, v in _traffic.items()), key=lambda r: -r["wire"])
+    return {"since": _traffic_since, "watched": watched(), "rows": rows,
+            "calls": sum(r["calls"] for r in rows), "wire": sum(r["wire"] for r in rows), "raw": sum(r["raw"] for r in rows)}
 
 
 def _net_mark(st, now, error=None):
@@ -409,17 +446,20 @@ def http_get(url, timeout=20):
     if st["down"] and now - st["lastTry"] < NET_RETRY:
         raise RuntimeError("%s unreachable (%s), next try in %d s" % (host, st["error"], NET_RETRY - (now - st["lastTry"])))
     st["lastTry"] = now
-    req = urllib.request.Request(url, headers={"User-Agent": "imd-panel/1 (+localhost)"})
+    # gzip: the feeds are JSON and shrink 5-8x (/seats/:id with its work list: 1.25 MB -> 200 kB)
+    req = urllib.request.Request(url, headers={"User-Agent": "imd-panel/1 (+localhost)", "Accept-Encoding": "gzip"})
     try:
         with urllib.request.urlopen(req, timeout=min(timeout, 10) if st["down"] else timeout) as r:
-            body = r.read().decode("utf-8", "replace")
+            wire = r.read()
+            raw = gzip.decompress(wire) if (r.headers.get("Content-Encoding") or "").lower() == "gzip" else wire
+            body = raw.decode("utf-8", "replace")
     except urllib.error.HTTPError as e:  # the host answered: only 5xx means it is down
-        _net_mark(st, now, "HTTP %d" % e.code if e.code >= 500 else None)
+        _net_mark(st, now, "HTTP %d" % e.code if e.code >= 500 else None); _count(url, now, error=True)
         raise
     except (urllib.error.URLError, OSError) as e:  # timeout, refused, DNS
-        _net_mark(st, now, str(getattr(e, "reason", e))[:80] or type(e).__name__)
+        _net_mark(st, now, str(getattr(e, "reason", e))[:80] or type(e).__name__); _count(url, now, error=True)
         raise
-    _net_mark(st, now)
+    _net_mark(st, now); _count(url, now, len(wire), len(raw))
     return body
 
 
@@ -689,7 +729,7 @@ def pass_config(d):
     d["skills"] = memo("skills", 300, skills_list)
     d["hostName"] = HOST  # "host" below is replaced by the host stats
     d["host"] = memo("host", 60, host_stats)
-    ex = memo("explorer", 300, lambda: explorer_fetch(cfg.get("tokenId")))
+    ex = memo("explorer", 300, lambda: explorer_fetch(cfg.get("tokenId")), idle=1800)
     d["explorer"] = {k: v for k, v in ex.items() if k not in ("verdicts", "titles")}
     verdicts = ex.get("verdicts", {}) if isinstance(ex, dict) else {}
     acc = defaultdict(Counter)
@@ -976,6 +1016,30 @@ CHAINS = {1: ("mainnet", "https://etherscan.io"), 11155111: ("sepolia", "https:/
 FINAL_JOB_STATES = ("completed", "cancelled", "blocked", "failed")
 REVIEW_RANK = {"sent": 3, "submitted": 2, "queued": 1}
 _subs = {}  # job id -> (ts, value): our attempts on that job, from /jobs/:id/submissions
+SUBS_FILE = state("subs-final.json.gz")  # settled verdicts survive a restart: a decided attempt never changes again
+_subs_dirty = [False, 0.0]
+
+
+def subs_load():
+    try:
+        with gzip.open(SUBS_FILE, "rt") as fh:
+            for job, v in json.load(fh).items():
+                _subs[job] = (time.time(), v)
+    except (OSError, ValueError, EOFError):
+        pass
+
+
+def subs_save(force=False):
+    if not _subs_dirty[0] or (not force and time.time() - _subs_dirty[1] < 1800):
+        return
+    keep = {job: v for job, (ts, v) in _subs.items() if _settled(v)}
+    tmp = SUBS_FILE + ".tmp"
+    with gzip.open(tmp, "wt", compresslevel=6) as fh:
+        json.dump(keep, fh, separators=(",", ":"))
+    os.replace(tmp, SUBS_FILE); _subs_dirty[:] = [False, time.time()]
+
+
+subs_load()
 
 
 def api_json(path, timeout=20):
@@ -987,16 +1051,35 @@ def chain_of(cid):
     return {"id": cid, "name": name, "scan": scan}
 
 
+_seat_raw = {"token": None, "work": {}, "reviews": {}, "sig": None, "fullAt": 0}
+SEAT_FULL_EVERY = 1800  # the whole work list (1.25 MB raw); in between only what moved
+
+
 def seat_fetch(token):
-    """GET /seats/:tokenId with every submission and review: the server's own record of this seat."""
-    d = api_json(f"/seats/{token}?work=1000&reviews=1000", timeout=40)
+    """GET /seats/:tokenId: the server's own record of this seat. The counts come with every answer; the work and review
+    lists are read in full every 30 min, otherwise the newest 150 only when a count moved, and merged by submission."""
+    R = _seat_raw; now = time.time()
+    if R["token"] != token:
+        R.update(token=token, work={}, reviews={}, sig=None, fullAt=0)
+    full = now - R["fullAt"] > SEAT_FULL_EVERY or not R["work"]
+    d = api_json(f"/seats/{token}?work=1000&reviews=1000" if full else f"/seats/{token}?work=0&reviews=0", timeout=40)
+    sig = tuple(d.get(k) for k in ("attempts", "accepted", "rejected", "failed", "pending"))
+    rkey = lambda r: "%s:%s:%s" % (r.get("submissionHash"), r.get("nodeKey"), r.get("role"))
+    if full:
+        R.update(work={w.get("submissionHash"): w for w in d.get("work") or []}, reviews={rkey(r): r for r in d.get("reviews") or []}, fullAt=now)
+    elif sig != R["sig"]:
+        part = api_json(f"/seats/{token}?work=150&reviews=150", timeout=40)
+        R["work"].update({w.get("submissionHash"): w for w in part.get("work") or []})
+        R["reviews"].update({rkey(r): r for r in part.get("reviews") or []})
+        sig = tuple(part.get(k) for k in ("attempts", "accepted", "rejected", "failed", "pending"))
+    R["sig"] = sig
     work = {}
-    for w in d.get("work") or []:
+    for w in R["work"].values():
         h = (w.get("submissionHash") or "")[:12]
         if h:
             work[h] = w
     reviews = {}; rstat = Counter()
-    for r in d.get("reviews") or []:
+    for r in R["reviews"].values():
         h = (r.get("submissionHash") or "")[:12]; rstat[r.get("status") or "?"] += 1
         if h and REVIEW_RANK.get(r.get("status"), 0) >= REVIEW_RANK.get((reviews.get(h) or {}).get("status"), 0):
             reviews[h] = r
@@ -1038,10 +1121,30 @@ def submissions_fetch(job, token):
     return {"job": job, "mine": out, "all": allm, "field": field, "fetchedAt": time.time(), "final": all(m["final"] for m in out) if out else False}
 
 
+def _pending_ttl(v):
+    """How often to re-read a job our attempt on which has no verdict yet: 5 min in its first hour, 30 min the first
+    day, 3 h up to three days, 12 h after that (oracle questions that never reach quorum stay "pending" for days)."""
+    try:
+        age = time.time() - min(parse_ts(m["createdAt"]) for m in v.get("mine") or [] if m.get("createdAt"))
+    except ValueError:
+        return 300
+    return 300 if age < 3600 else 1800 if age < 86400 else 3 * 3600 if age < 3 * 86400 else 12 * 3600
+
+
+def _settled(v):
+    """A final verdict read 6 h or more after our attempt: the job's field (seats, accepted) has stopped moving too."""
+    if not v.get("final") or v.get("error"):
+        return False
+    try:
+        return v.get("fetchedAt", 0) - min(parse_ts(m["createdAt"]) for m in v.get("mine") or [] if m.get("createdAt")) > 6 * 3600
+    except ValueError:
+        return False
+
+
 def subs_cached(job, token, budget):
     """Cache in front of submissions_fetch. budget is a one-element list: fetches still allowed in this collect()."""
     hit = _subs.get(job)
-    if hit and time.time() - hit[0] < (6 * 3600 if hit[1].get("final") else 300):
+    if hit and (_settled(hit[1]) or time.time() - hit[0] < (6 * 3600 if hit[1].get("final") else _pending_ttl(hit[1]))):
         return hit[1]
     if budget[0] <= 0:
         return hit[1] if hit else None
@@ -1051,6 +1154,8 @@ def subs_cached(job, token, budget):
     except Exception as e:
         v = dict(hit[1], error=str(e)[:120]) if hit else {"job": job, "mine": [], "field": {}, "error": str(e)[:120], "final": False}
     _subs[job] = (time.time(), v)
+    if _settled(v):
+        _subs_dirty[0] = True
     return v
 
 
@@ -1109,6 +1214,7 @@ def earnings_fetch(wallet):
     if not wallet:
         return {"wallet": None, "items": [], "count": 0}
     d = api_json(f"/wallets/{wallet}/earnings?limit=200", timeout=30)
+    launches = launches_known()  # the repository of each launch, without one /launches/:id per allocation
     items = []; by_chain = defaultdict(lambda: {"launches": 0, "tokens": 0})
     for e in d.get("earnings") or []:
         tok = e.get("token") or {}; dec = int(tok.get("decimals") or 18); ch = chain_of(e.get("chainId"))
@@ -1116,7 +1222,7 @@ def earnings_fetch(wallet):
             amt = int(e.get("amount") or 0) / 10 ** dec
         except (TypeError, ValueError):
             amt = None
-        launch = memo("launch:" + str(e.get("launchId")), 6 * 3600, lambda: api_json(f"/launches/{e.get('launchId')}", timeout=20))
+        launch = launches.get(e.get("launchId"))
         items.append({"launchId": e.get("launchId"), "launchNumber": e.get("launchNumber"), "status": e.get("status"), "kind": e.get("kind"), "at": e.get("at"),
                       "chain": ch, "token": {"address": tok.get("address"), "name": tok.get("name"), "symbol": tok.get("symbol"), "decimals": dec}, "amount": amt,
                       "tokenUrl": f"{ch['scan']}/token/{tok.get('address')}?a={wallet}" if ch["scan"] and tok.get("address") else None,
@@ -1133,6 +1239,9 @@ def earnings_fetch(wallet):
 _records = {}  # job id -> (ts, value): the job's work records, from /jobs/:id/records
 
 
+_reg_raw = {"token": None, "batches": {}, "fullAt": 0, "scanned": 0, "oldest": None, "workRegistry": None}
+
+
 def registry_fetch(token, oldest_iso=None, pages=4):
     """Our seat's ERC-8004 registration (from /agents/by-token) plus every feedback-batch entry about this seat.
     Pages the feed backwards until it is older than our oldest task (or `pages` pages of 500)."""
@@ -1145,8 +1254,14 @@ def registry_fetch(token, oldest_iso=None, pages=4):
            "url": f"https://8004scan.io/agents/ethereum/{agent_id}" if agent_id else None, "docUrl": f"{API}/agents/by-token/{token}.json",
            "batches": {"sent": 0, "queued": 0, "submitted": 0, "failed": 0, "total": 0}, "entries": {"count": 0, "positive": 0, "byTag": {}},
            "bySub": {}, "byJob": {}, "lastSentAt": None, "lastTx": None, "workRegistry": None, "feedScanned": 0, "feedOldest": None}
-    before = None; scanned = 0
-    for _ in range(pages):
+    # the feed is fleet-wide (500 batches = ~760 kB raw): every page back to our oldest task once every 6 h, the newest
+    # page in between; batches about this seat are kept by id, so a queued one turns sent on the next newest-page read
+    G = _reg_raw
+    if G["token"] != token:
+        G.update(token=token, batches={}, fullAt=0, scanned=0, oldest=None, workRegistry=None)
+    full = time.time() - G["fullAt"] > 6 * 3600 or not G["fullAt"]
+    before = None; scanned = 0; seen = {}
+    for _ in range(pages if full else 1):
         q = f"/feedback/batches?limit=500" + (f"&before={before}" if before else "")
         d = api_json(q, timeout=40)
         batches = d.get("batches") or []
@@ -1154,27 +1269,36 @@ def registry_fetch(token, oldest_iso=None, pages=4):
             break
         for b in batches:
             scanned += 1
-            out["workRegistry"] = out["workRegistry"] or b.get("workRegistry")
+            G["workRegistry"] = G["workRegistry"] or b.get("workRegistry")
             mine = [e for e in b.get("entries") or [] if str(e.get("tokenId")) == token]
-            if not mine:
-                continue
-            st = b.get("status") or "?"
-            out["batches"][st if st in out["batches"] else "failed"] += 1; out["batches"]["total"] += 1
-            row = {"batchId": b.get("id"), "jobId": b.get("jobId"), "status": st, "tx": b.get("txHash"), "txUrl": f"{ETHERSCAN}/tx/{b['txHash']}" if b.get("txHash") else None,
-                   "sentAt": b.get("sentAt"), "createdAt": b.get("createdAt"), "documentHash": b.get("documentHash"), "failure": b.get("failure"),
-                   "entries": [{"tag": e.get("tag1"), "policy": e.get("tag2"), "value": e.get("value"), "nodeKey": e.get("nodeKey"), "submissionHash": e.get("submissionHash")} for e in mine]}
-            if st == "sent" and b.get("sentAt") and (out["lastSentAt"] or "") < b["sentAt"]:
-                out["lastSentAt"], out["lastTx"] = b["sentAt"], b.get("txHash")
-            for e in mine:
-                out["entries"]["count"] += 1; out["entries"]["positive"] += 1 if e.get("value") == 1 else 0
-                tag = e.get("tag1") or "?"; out["entries"]["byTag"][tag] = out["entries"]["byTag"].get(tag, 0) + 1
-                h = (e.get("submissionHash") or "")[:12]
-                if h and (h not in out["bySub"] or REVIEW_RANK.get(st, 0) >= REVIEW_RANK.get(out["bySub"][h]["status"], 0)):
-                    out["bySub"][h] = dict(row, entry={"tag": e.get("tag1"), "policy": e.get("tag2"), "value": e.get("value"), "nodeKey": e.get("nodeKey")}, entries=None)
-            out["byJob"].setdefault(b.get("jobId"), []).append({k: row[k] for k in ("batchId", "status", "tx", "txUrl", "sentAt", "documentHash")})
-        before = batches[-1].get("createdAt"); out["feedOldest"] = before
+            if mine:
+                seen[b.get("id")] = dict(b, entries=mine)
+        before = batches[-1].get("createdAt")
+        if full:
+            G["oldest"] = before
         if oldest_iso and before and before < oldest_iso:
             break
+    if full:
+        G.update(batches=seen, fullAt=time.time(), scanned=scanned)
+    else:
+        G["batches"].update(seen)
+    out["workRegistry"] = G["workRegistry"]; out["feedOldest"] = G["oldest"]; scanned = G["scanned"]
+    for b in sorted(G["batches"].values(), key=lambda b: b.get("createdAt") or "", reverse=True):
+        mine = b["entries"]
+        st = b.get("status") or "?"
+        out["batches"][st if st in out["batches"] else "failed"] += 1; out["batches"]["total"] += 1
+        row = {"batchId": b.get("id"), "jobId": b.get("jobId"), "status": st, "tx": b.get("txHash"), "txUrl": f"{ETHERSCAN}/tx/{b['txHash']}" if b.get("txHash") else None,
+               "sentAt": b.get("sentAt"), "createdAt": b.get("createdAt"), "documentHash": b.get("documentHash"), "failure": b.get("failure"),
+               "entries": [{"tag": e.get("tag1"), "policy": e.get("tag2"), "value": e.get("value"), "nodeKey": e.get("nodeKey"), "submissionHash": e.get("submissionHash")} for e in mine]}
+        if st == "sent" and b.get("sentAt") and (out["lastSentAt"] or "") < b["sentAt"]:
+            out["lastSentAt"], out["lastTx"] = b["sentAt"], b.get("txHash")
+        for e in mine:
+            out["entries"]["count"] += 1; out["entries"]["positive"] += 1 if e.get("value") == 1 else 0
+            tag = e.get("tag1") or "?"; out["entries"]["byTag"][tag] = out["entries"]["byTag"].get(tag, 0) + 1
+            h = (e.get("submissionHash") or "")[:12]
+            if h and (h not in out["bySub"] or REVIEW_RANK.get(st, 0) >= REVIEW_RANK.get(out["bySub"][h]["status"], 0)):
+                out["bySub"][h] = dict(row, entry={"tag": e.get("tag1"), "policy": e.get("tag2"), "value": e.get("value"), "nodeKey": e.get("nodeKey")}, entries=None)
+        out["byJob"].setdefault(b.get("jobId"), []).append({k: row[k] for k in ("batchId", "status", "tx", "txUrl", "sentAt", "documentHash")})
     out["feedScanned"] = scanned
     out["lastTxUrl"] = f"{ETHERSCAN}/tx/{out['lastTx']}" if out.get("lastTx") else None
     return out
@@ -1230,10 +1354,10 @@ def pass_api(d):
     d["seat"] = {k: v for k, v in seat.items() if k not in ("work", "reviewBySub")} if isinstance(seat, dict) else {"error": str(seat)}
     d["standing"] = memo("standing", 30, lambda: standing_fetch(token)) if token else {}
     d["network"] = memo("network", 60, network_fetch)
-    d["fleet"] = memo("fleet", 900, lambda: fleet_fetch(token))
-    d["earnings"] = memo("earnings", 900, lambda: earnings_fetch(wallet))
+    d["fleet"] = memo("fleet", 900, lambda: fleet_fetch(token), idle=3600)
+    d["earnings"] = memo("earnings", 900, lambda: earnings_fetch(wallet), idle=3600)
     work = seat.get("work") or {} if isinstance(seat, dict) else {}; reviews = seat.get("reviewBySub") or {} if isinstance(seat, dict) else {}
-    budget = [6]  # new /jobs/:id/submissions fetches per collect(); the cache fills within a few refreshes
+    budget = [6 if watched() else 3]  # /jobs/:id/submissions fetches per collect(); verdicts feed the notifier, so some go on unwatched
     # rejected / failed / pending first, then the most recent: those are the ones whose server record can still change or explain something
     prio = {"rejected": 0, "failed": 0, "pending": 1, "accepted": 2}
     order = sorted([t for t in d["tasks"] if t.get("submissionId")], key=lambda t: (prio.get((work.get(t["submissionId"]) or {}).get("status"), 1), -t.get("acceptedAt", 0)))
@@ -1280,10 +1404,10 @@ def pass_api(d):
     # the reputation registry: feedback batches about this seat (replaces 8004scan) and the work records per job
     oldest = min((t.get("acceptedAt") or 0 for t in d["tasks"] if t.get("acceptedAt")), default=None)
     oldest_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(oldest)) if oldest else None
-    reg = memo("registry", 900, lambda: registry_fetch(token, oldest_iso)) if token else {}
+    reg = memo("registry", 900, lambda: registry_fetch(token, oldest_iso), idle=6 * 3600) if token else {}
     d["registry"] = {k: v for k, v in reg.items() if k not in ("bySub", "byJob")} if isinstance(reg, dict) else {"error": str(reg)}
     by_sub = reg.get("bySub") or {} if isinstance(reg, dict) else {}
-    rbudget = [4]  # new /jobs/:id/records fetches per collect()
+    rbudget = [4 if watched() else 0]  # new /jobs/:id/records fetches per collect(); none while nobody looks
     for t in order:
         fb = by_sub.get(t["submissionId"])
         if fb:
@@ -1309,6 +1433,7 @@ def pass_api(d):
             if t.get("model"): acc["model:" + t["model"]][t["verdict"]] += 1
     d["acceptance"] = {k: dict(v) for k, v in acc.items()}
     d["subsCache"] = {"jobs": len(_subs), "budgetLeft": budget[0], "records": len(_records), "recordsBudgetLeft": rbudget[0]}
+    subs_save()
     return d
 
 
@@ -1413,22 +1538,38 @@ def sites_fetch():
     return {"sites": out}
 
 
+_pubs_raw = {"items": {}, "fullAt": 0}
+PUBS_FULL_EVERY = 6 * 3600  # every page (13 of 100 on 6 Oct, ~360 kB raw each); in between the newest page only
+
+
+def launches_list():
+    """GET /launches?limit=500, shared by the published catalogue and the earnings module (launch id -> record)."""
+    return {l.get("id"): l for l in api_json("/launches?limit=500", timeout=30).get("launches") or []}
+
+
+def launches_known():
+    v = memo("launches", 1800, launches_list)
+    return {k: x for k, x in v.items() if k != "error"} if isinstance(v, dict) else {}
+
+
 def publications_fetch():
     """GET /publications?type=all: every project the network shipped — contract launches, sites, research reports —
-    with the job title; launch numbers, repositories and parked reasons joined from /launches."""
-    items = []; page = 1
-    while page <= 10:
+    with the job title; launch numbers, repositories and parked reasons joined from /launches. All pages every 6 h,
+    the newest page otherwise (merged by id: new projects and status changes show up on it)."""
+    P = _pubs_raw; full = time.time() - P["fullAt"] > PUBS_FULL_EVERY or not P["items"]
+    fresh = {}; page = 1
+    while page <= 20:
         d = api_json(f"/publications?type=all&pageSize=100&page={page}", timeout=30)
-        items += d.get("items") or []
-        if page >= (d.get("totalPages") or 1):
+        fresh.update({it.get("id"): it for it in d.get("items") or []})
+        if not full or page >= (d.get("totalPages") or 1):
             break
         page += 1
-    launches = {}
-    try:
-        for l in api_json("/launches?limit=500", timeout=30).get("launches") or []:
-            launches[l.get("id")] = l
-    except Exception:
-        pass
+    if full:
+        P.update(items=fresh, fullAt=time.time())
+    else:
+        P["items"].update(fresh)
+    items = list(P["items"].values())
+    launches = launches_known()
     out = []
     for it in items:
         pid = it.get("id") or ""; kind, _, ref = pid.partition(":")
@@ -1507,12 +1648,12 @@ def crew_build(token, seat, workers_by, budget):
 def pass_swarm(d):
     """The swarm: fleet, workers, recent jobs, publications, crew."""
     cfg = d.get("config") or {}; token = str(cfg.get("tokenId") or "")
-    sw = memo("swarm", 30, swarm_fetch)
-    wk = memo("workers", 120, workers_fetch)
-    rc = memo("recent", 120, recent_fetch)
-    pb = memo("publications", 300, publications_fetch)
+    sw = memo("swarm", 30, swarm_fetch, idle=300)  # idle: one sample per 5-minute bucket of the day chart
+    wk = memo("workers", 120, workers_fetch, idle=1800)
+    rc = memo("recent", 120, recent_fetch, idle=1800)
+    pb = memo("publications", 300, publications_fetch, idle=6 * 3600)
     seat = _slow.get("seat", (0, {}))[1] if isinstance(_slow.get("seat", (0, {}))[1], dict) else {}
-    budget = [5]
+    budget = [5 if watched() else 0]
     if not isinstance(sw, dict) or "seats" not in sw:
         d["swarm"] = {"error": (sw or {}).get("error") if isinstance(sw, dict) else str(sw)}
         return d
@@ -1763,16 +1904,16 @@ def pass_protocol(d):
     """Workflows, research panels, fuzz campaigns, delivered results, services, seat records."""
     cfg = d.get("config") or {}; token = str(cfg.get("tokenId") or "")
     net = d.get("network") if isinstance(d.get("network"), dict) else None
-    sv = memo("services", 120, services_fetch)
+    sv = memo("services", 120, services_fetch, idle=1800)
     if net is not None:
         net["servicesDetail"] = sv.get("services") if isinstance(sv, dict) else None
         net["build"] = sv.get("build") if isinstance(sv, dict) else None
         net["servicesError"] = sv.get("error") if isinstance(sv, dict) else str(sv)
-    rec = memo("seatRecords", 900, lambda: seat_records_fetch(token)) if token else None
+    rec = memo("seatRecords", 900, lambda: seat_records_fetch(token), idle=6 * 3600) if token else None
     if isinstance(d.get("fleet"), dict):
         d["fleet"]["seats"] = {k: v for k, v in rec.items() if k != "top"} if isinstance(rec, dict) else {"error": str(rec)}
         d["fleet"]["seats"]["top"] = (rec or {}).get("top") if isinstance(rec, dict) else None
-    jb = [4]; wb = [3]; rb = [3]; pb = [3]
+    jb, wb, rb, pb = ([4], [3], [3], [3]) if watched() else ([0], [0], [0], [0])  # job details are for the page only
     for t in d.get("tasks") or []:
         job = t.get("job")
         if not job:
@@ -1849,9 +1990,15 @@ def oracle_family(q):
     return " ".join(s.split()[:9])
 
 
+_oracle_raw = {"byJob": {}, "fullAt": 0}
+
+
 def oracle_status_fetch(oldest_iso, pages=6):
+    """Status of every oracle request back to our oldest task: all pages once an hour, the newest 500 in between
+    (merged by job; an older request rarely changes within the hour)."""
+    O = _oracle_raw; full = time.time() - O["fullAt"] > 3600 or not O["byJob"]
     out = {}; before = None
-    for _ in range(pages):
+    for _ in range(pages if full else 1):
         d = api_json("/oracle/requests?limit=500" + (f"&before={before}" if before else ""), timeout=30)
         rs = d.get("requests") or []
         if not rs:
@@ -1863,7 +2010,11 @@ def oracle_status_fetch(oldest_iso, pages=6):
         before = rs[-1].get("createdAt")
         if not before or (oldest_iso and before < oldest_iso):
             break
-    return {"byJob": out, "fetchedAt": time.time()}
+    if full:
+        O.update(byJob=out, fullAt=time.time())
+    else:
+        O["byJob"].update(out)
+    return {"byJob": dict(O["byJob"]), "fetchedAt": time.time()}
 
 
 VERDICT_LABEL = {"noquorum": "no quorum", "blocked": "blocked"}
@@ -1874,7 +2025,7 @@ def pass_oracle_status(d):
     if oracle or openq:
         oldest = min(t.get("submittedAt") or t.get("acceptedAt") or 0 for t in oracle + openq)
         oldest_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(oldest - 3600)) if oldest else None
-        om = memo("oracleStatus", 300, lambda: oracle_status_fetch(oldest_iso))
+        om = memo("oracleStatus", 300, lambda: oracle_status_fetch(oldest_iso), idle=3600)
         by = om.get("byJob") if isinstance(om, dict) else {}
         for t in oracle:
             r = by.get(t["job"]) if by else None
@@ -2025,6 +2176,7 @@ def collect():
     for p in PASSES:
         d = p(d) or d
     d["net"] = net_status()
+    d["traffic"] = traffic()
     return d
 
 

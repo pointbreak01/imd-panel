@@ -151,8 +151,11 @@ class H(BaseHTTPRequestHandler):
         if path == "/api/history":
             return self.send(200, "application/json", json.dumps(history.read()).encode())
         if path == "/api/data":
-            return self.send(200, "application/json", data(force="refresh=1" in self.path))
+            # a page coming back after a quiet spell gets a fresh collect: what only the page shows was left to age meanwhile
+            was = collect.watched(); collect._viewed[0] = time.time()
+            return self.send(200, "application/json", data(force="refresh=1" in self.path or not was))
         if path == "/api/earnings":  # its own feed: chain reads and reward trees, fetched when the tab opens
+            collect._viewed[0] = time.time()
             try:
                 return self.send(200, "application/json", json.dumps(earnings.data(force="refresh=1" in self.path), default=str).encode())
             except Exception as e:
@@ -165,6 +168,7 @@ class H(BaseHTTPRequestHandler):
             except Exception as e:
                 return self.send(400, "application/json", json.dumps({"error": str(e)[:400]}).encode())
         if path == "/api/lite":  # the 30-second refresh: state, heartbeat, usage, guard and the live feed — not the 1.7 MB task list
+            collect._viewed[0] = time.time()
             data(); raw = _cache.get("raw") or {}
             lite = {k: raw.get(k) for k in LITE_KEYS if k in raw}
             lite["guard"] = {"config": guard_cfg(), "state": _guard_state}; lite["lite"] = True

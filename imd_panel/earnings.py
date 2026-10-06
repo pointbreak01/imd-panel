@@ -145,8 +145,11 @@ def rpc_batch(chain, calls, timeout=25):
         for url in rpc_urls(chain):
             try:
                 req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json", "User-Agent": "imd-panel/1 (+localhost)"})
+                t0 = time.time()
                 with urllib.request.urlopen(req, timeout=timeout) as r:
-                    res = json.loads(r.read())
+                    raw = r.read()
+                collect._count(url, t0, len(raw) + len(body), len(raw) + len(body))  # shows in Settings → api traffic
+                res = json.loads(raw)
                 if not isinstance(res, list):
                     raise RuntimeError(str((res or {}).get("error") or res)[:120])
                 by = {x.get("id"): x for x in res}
