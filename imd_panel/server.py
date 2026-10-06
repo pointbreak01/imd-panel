@@ -4,7 +4,7 @@ import gzip, glob, json, os, re, shutil, subprocess, sys, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from . import collect, notify, history
+from . import collect, notify, history, earnings
 from .paths import HERE, state
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", "8787"))
@@ -152,6 +152,18 @@ class H(BaseHTTPRequestHandler):
             return self.send(200, "application/json", json.dumps(history.read()).encode())
         if path == "/api/data":
             return self.send(200, "application/json", data(force="refresh=1" in self.path))
+        if path == "/api/earnings":  # its own feed: chain reads and reward trees, fetched when the tab opens
+            try:
+                return self.send(200, "application/json", json.dumps(earnings.data(force="refresh=1" in self.path), default=str).encode())
+            except Exception as e:
+                return self.send(500, "application/json", json.dumps({"error": str(e)[:400]}).encode())
+        if path == "/api/earnings/tx":  # calldata for the browser wallet to sign; reads only, nothing is sent from here
+            from urllib.parse import parse_qs
+            q = {k: v[0] for k, v in parse_qs(self.path.split("?", 1)[1] if "?" in self.path else "").items()}
+            try:
+                return self.send(200, "application/json", json.dumps(earnings.claim_tx(q), default=str).encode())
+            except Exception as e:
+                return self.send(400, "application/json", json.dumps({"error": str(e)[:400]}).encode())
         if path == "/api/lite":  # the 30-second refresh: state, heartbeat, usage, guard and the live feed — not the 1.7 MB task list
             data(); raw = _cache.get("raw") or {}
             lite = {k: raw.get(k) for k in LITE_KEYS if k in raw}

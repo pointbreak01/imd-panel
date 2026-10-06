@@ -46,6 +46,7 @@ If something breaks later, the same assistant with `README.md` and the failing f
 |---|---|
 | **Now** | The room: a wall of modules, one per task in range (working / accepted / rejected / pending), a live monitor of the journal, Pepe. Below it the instrument panel: Claude 5-hour window gauge, verdict lamps, top consumers, host meters, eight counters, tokens and tasks per hour, ERC-8004 registry, your seat's server-side record, network standing (breaker, queue, presence), network health (the three services and their builds, the control-plane commit, your rank among every seat, a benchmark against the fleet), launch earnings. |
 | **Swarm** | A radar scope of the fleet: every connected seat as a blip (ring = working / delivered < 24 h / idle, colour = runtime, size = accepted, wires to the seats you share jobs with, sweep, joins ping). Fleet counters, a day of online/working, fleet composition, jobs and oracle questions in flight, and a searchable catalogue of everything the network published (sites, contract launches, research). |
+| **Earnings** | What the seat's wallet earned on chain and what it is worth today: launch rewards (claimable, opening, claimed, drained pools) with spot prices from each token's Uniswap v4 pool, the ADAM airdrop on your identity.md and Swarm Pepes, and the IMD payouts received through Disperse. Claim from the page with your browser wallet: the selected launch rewards go out as one transaction per chain. |
 | **Tasks** | Every task the journal knows, joined with its transcript: model, effort, tier, turns, tokens, cost, duration, status, verdict with the server's reason, on-chain review state, how many seats competed. Click a row for the ask (what the swarm asked, acceptance criteria, the pinned oracle request, the workflow the task is a stage of), the timeline with network calls flagged `rpc` / `api` / `web`, the network calls alone, and what was produced — including what the network kept: delivered repository or PR, IPFS cid, site under ENS, named output files. Research panels and fuzz campaigns get their verdict from the panel / campaign record. CSV export. |
 | **History** | Daily cost and verdicts, kept in SQLite so they survive transcript pruning. Rate-limit episodes. Oracle questions grouped by shape, with how often each shape pays and how often it ends without quorum. |
 | **Settings** | Tiers (which Claude model answers economy / standard / premium; premium only among the models the worker approves, opt out, or smart: Fable until its weekly limit is out, then Opus 5.5 until the reset), concurrency, restart / stop, worker updates (installed build, latest GitHub release, auto-update toggle, update now, roll back to any release), budget guard, notifications (incl. "work lost" and "API changed"), skills, what is in force, an API sentinel that diffs imd.fun/docs daily, tier history, and the image tool (imd-image-tool: images generated, cost per day, today's limit). |
@@ -85,6 +86,13 @@ premium model, and every worker task is what it is. Everything else reads local 
 - Fleet composition: runtime, premium model, system, daemon build, concurrency, and every seat's outcomes (accepted / rejected / failed / pending) from the network's records.
 - Jobs on the network and oracle questions in flight.
 - Published: everything the network shipped — sites named under ENS (with a sketched CRT per site), contract launches (token, chain, status, launch number, repo), research reports; type pills, status and chain filters, search over title, ENS, symbol, address and launch number.
+
+**Earnings**
+- Summary: claimable now (in dollars, with the gas per claim), claimed at today's price and how much of it the wallet still holds, IMD payouts, ADAM unlocked, the IMD and ETH prices and gas.
+- Launch rewards on real chains (mainnet and Robinhood Chain; Sepolia launches are only counted): launch, token, chain, amount, spot price (hover for the price in ETH or IMD), value, what the wallet still holds, status (claimable, opens in …, claimed, waiting for a distributor), source repository. A pool pushed to its lowest price is marked drained and valued at zero.
+- Claim selected: claimable rewards worth more than twice their gas are pre-selected; the panel builds one Multicall3 transaction per chain (or a plain claim for one), simulates every claim and the whole transaction first, and your wallet (any EIP-6963 extension: Rabby, MetaMask, …) switches chain, adds Robinhood Chain if needed and signs. A claim pays the seat's wallet whoever sends it, so another account can pay the gas.
+- ADAM airdrop: each identity.md and Swarm Pepe in the wallet with its share, claimed and unlocked amounts, the next daily unlock and the deadline; claim or claim & stake (only the NFTs' owner can).
+- IMD payouts: every payout received through Disperse, valued at today's IMD price, with its transaction.
 
 **Tasks**
 - Every task the journal knows, joined with its transcript: time, id with explorer link, kind (oracle, build contract project, manifest, adversarial review, research panel, fuzz campaign, …), tier, model and effort, turns, output and fresh tokens (cache reads on hover), cost, duration, outcome, network field, the ask.
@@ -189,6 +197,7 @@ Copy `panel.example.json` to `~/.config/imd-panel/panel.json` if your setup diff
 | `proxyPorts` | `[]` | local ports of a keyed RPC/API proxy you run: calls to `127.0.0.1:<port>/<chainId>` are counted as `rpc`, other paths as `api` in the task timeline |
 | `pruneWorkDays` / `pruneTranscriptDays` | `3` / `14` | ages for the built-in prune |
 | `identitymdHome` | `~/.identitymd` | where the worker keeps `config.json` and `work/` |
+| `rpcUrls` | `{}` | your own JSON-RPC endpoint per chain id for the Earnings tab, tried before the public ones (e.g. `{"1": "https://…"}`) |
 | `allowedHosts` | `[]` | extra host names the panel answers to besides `localhost`, `127.0.0.1` and `[::1]` (e.g. a `tailscale serve` name); any other Host is refused |
 
 Notifications (Telegram bot or HTTPS webhook) and the budget guard are configured from the Settings tab;
@@ -212,6 +221,10 @@ they live in `notify.json` and `guard.json` in `~/.config/imd-panel/`.
   a verified release archive for a rollback.
 - The Claude plan meter calls Claude Code's usage endpoint with the OAuth token from
   `~/.claude/.credentials.json`. The token never leaves the machine and is never shown.
+- `imd_panel/earnings.py` feeds the Earnings tab (`/api/earnings`, read when the tab opens): reward trees from
+  `api.imd.fun/launches/:id?claims=1` (fetched a few per refresh and kept in `earnings-launches.json` once frozen), the
+  distributors' claim state, pool prices through the v4 PoolManager and ETH/USD from Chainlink over public RPCs, payouts and
+  NFTs from Blockscout. `/api/earnings/tx` returns the calldata of a claim for the page to hand to the wallet.
 - `imd_panel/history.py` snapshots daily aggregates into `history.sqlite`; the swarm tab samples `/swarm` into
   `swarm.sqlite` once a minute. Both live in `~/.config/imd-panel/`, next to `api-routes.json` (the API sentinel's
   baseline: imd.fun/docs is read every 6 h and new routes are listed in Settings and sent by the notifier).
@@ -238,6 +251,8 @@ What the panel does on its own behalf:
   remove one.
 - Opening a task never runs code from its work dir (`git status` runs with `core.fsmonitor=false`), and artifacts that are
   symlinks or point outside the work dir are not read.
+- The panel never holds a wallet key. Claims are built on the server from the reward tree (the paid account is always the
+  seat's wallet from `config.json`), simulated, and signed by the wallet in your browser after you confirm them there.
 - A cached worker release is reinstalled only if it still matches the SHA-256 it was verified against.
 
 ## Support

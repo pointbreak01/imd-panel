@@ -11,7 +11,7 @@ from .paths import HERE, STATE_DIR, state
 
 HOME = os.path.expanduser("~")
 PROJECTS = os.path.join(HOME, ".claude", "projects")
-PANEL_DEFAULTS = {"workerUnit": "identitymd-worker.service", "cleanUnit": None, "proxyPorts": [], "pruneWorkDays": 3, "pruneTranscriptDays": 14, "identitymdHome": None, "allowedHosts": []}
+PANEL_DEFAULTS = {"workerUnit": "identitymd-worker.service", "cleanUnit": None, "proxyPorts": [], "pruneWorkDays": 3, "pruneTranscriptDays": 14, "identitymdHome": None, "allowedHosts": [], "rpcUrls": {}}
 
 
 def load_panel():

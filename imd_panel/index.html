@@ -464,9 +464,9 @@ section[data-tab="tasks"] .tscroll{max-height:calc(100vh - 150px)}
   .remote{width:100%;box-sizing:border-box;justify-content:space-between;padding:8px 16px 7px}
   .remote .led{min-width:0;flex:1 1 auto}
   .remote .keyc{flex:0 0 auto}
-  .tabs{display:grid;grid-template-columns:repeat(3,1fr);gap:0;margin:0 calc(-1 * var(--gutter)) 18px;padding:0;border-top:1px solid var(--soft);border-bottom:0}
+  .tabs{display:grid;grid-template-columns:repeat(4,1fr);gap:0;margin:0 calc(-1 * var(--gutter)) 18px;padding:0;border-top:1px solid var(--soft);border-bottom:0}
   .tabs>button[data-tab]{width:100%;margin:0;padding:12px 4px 12px;text-align:center;font-size:12.5px;border:0;border-right:1px solid var(--soft);border-bottom:2px solid var(--soft)}
-  .tabs>button[data-tab]:nth-child(3n){border-right:0}
+  .tabs>button[data-tab]:nth-child(4n){border-right:0}
   .tabs>button[data-tab].on{border-bottom-color:var(--ink)}
   .tabs #rangeInfo{display:none}
   .tabs .range{grid-column:1/-1;order:10;display:grid;grid-template-columns:repeat(5,1fr);margin:0;padding:0;border-top:1px solid var(--soft);border-bottom:1px solid var(--soft)}
@@ -478,6 +478,18 @@ section[data-tab="tasks"] .tscroll{max-height:calc(100vh - 150px)}
   .tabs>button[data-tab]{font-size:12px;padding:11px 2px}
   .nav-tools .pill .pill-cell{font-size:10px;padding:0 4px}
 }
+/* earnings */
+.ernk{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:1px;background:var(--pl-line);border:1px solid var(--pl-line)}
+.ernk>div{background:var(--pl-paper);padding:10px 12px;min-width:0}
+.ernk span{display:block;font-size:9.5px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--pl-dim)}
+.ernk b{display:block;margin-top:3px;font-size:21px;font-weight:600;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.ernk small{display:block;margin-top:2px;font-size:11px;line-height:1.45;color:var(--pl-dim)}
+@media (max-width:720px){.ernk>div:last-child:nth-child(odd){grid-column:1/-1}}
+.ernwallet{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;margin-top:12px;font-size:12.5px}
+.ernwallet code{font-size:12px}
+#ernLaunches tr.dim td{color:var(--faint)}#ernLaunches tr.dim td a{color:inherit}
+#ernLaunches td.ck{width:1px;padding-right:0}
+.ernbtns{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px;align-items:center}
 </style>
 </head>
 <body>
@@ -517,6 +529,7 @@ section[data-tab="tasks"] .tscroll{max-height:calc(100vh - 150px)}
 <div class="tabs" role="tablist" id="tabs">
   <button data-tab="now" class="on">Now</button>
   <button data-tab="swarm">Swarm</button>
+  <button data-tab="earnings">Earnings <span class="n" id="ernCount"></span></button>
   <button data-tab="tasks">Tasks <span class="n" id="taskCount"></span></button>
   <button data-tab="history">History</button>
   <button data-tab="settings">Settings</button>
@@ -552,6 +565,36 @@ section[data-tab="tasks"] .tscroll{max-height:calc(100vh - 150px)}
 <div class="pubgrid" id="pubGrid"></div>
 <div class="pubfoot"><button id="pubMore">show all</button><span class="muted" id="pubMoreInfo"></span></div>
 </div></div>
+</section>
+
+<!-- ============ EARNINGS ============ -->
+<section data-tab="earnings" hidden>
+<h2>Earnings <small>What this seat's wallet earned on chain, what is still to claim, and what it is worth at today's pool prices. The panel holds no key: it prepares each transaction and your browser wallet signs it.</small></h2>
+<div class="wallbg grid2">
+  <div class="mod full"><div class="lbl">01 · summary <span class="lr" id="ernInfo"></span></div>
+    <div class="ernk" id="ernSum"></div>
+    <div class="ernwallet" id="ernWallet"></div>
+    <div class="msg" id="ernMsg"></div>
+  </div>
+  <div class="mod full"><div class="lbl">02 · launch rewards <span class="lr" id="ernLInfo"></span></div>
+    <div class="caption"><p>Every launch on a real chain shares part of its token among the seats; each has a Merkle distributor that pays this seat's wallet whoever sends the claim, so the selected claims go out as <b>one transaction per chain</b>. Claims open an hour after the launch. Value = amount × the token's spot price in its Uniswap v4 pool; a pool pushed to its lowest price holds nothing to sell into and shows as <b>drained</b>. Pre-selected: claimable rewards worth more than twice their gas.</p></div>
+    <div class="row">
+      <span class="pubtypes" id="ernShow"><button data-s="open" class="on">to claim</button><button data-s="claimed">claimed</button><button data-s="all">all</button></span>
+      <button id="ernClaim" class="primary">claim selected</button>
+      <span class="muted" id="ernSelInfo"></span>
+    </div>
+    <div class="paper tscroll" style="max-height:60vh"><table id="ernLaunches" class="wide"></table></div>
+    <div class="muted" id="ernTestnet" style="font-size:11px;margin-top:8px"></div>
+  </div>
+  <div class="mod"><div class="lbl">03 · ADAM airdrop <span class="lr" id="ernAInfo"></span></div>
+    <div class="caption"><p>NFTClaim gives every identity.md and Swarm Pepe a share of ADAM that unlocks 10 % a day; what is not claimed by the deadline is burned. Only the NFTs' owner can claim. "claim &amp; stake" stakes it for you in the ADAM distributor instead of sending it to the wallet.</p></div>
+    <div id="ernAdam"></div>
+  </div>
+  <div class="mod"><div class="lbl">04 · IMD payouts <span class="lr" id="ernPInfo"></span></div>
+    <div class="caption"><p>IMD the founder sends to seat owners from the pool's fees through Disperse. Already in the wallet: nothing to claim. Valued at today's IMD price.</p></div>
+    <div id="ernPay"></div>
+  </div>
+</div>
 </section>
 
 <!-- ============ TASKS ============ -->
@@ -689,6 +732,7 @@ section[data-tab="tasks"] .tscroll{max-height:calc(100vh - 150px)}
 <script src="/assets/js/05-panel.js"></script>
 <script src="/assets/js/06-history.js"></script>
 <script src="/assets/js/07-swarm.js"></script>
+<script src="/assets/js/08-earnings.js"></script>
 
 </body>
 </html>
