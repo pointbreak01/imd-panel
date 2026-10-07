@@ -187,6 +187,23 @@ pipx upgrade imd-panel && systemctl --user restart imd-panel
 (`pipx reinstall imd-panel` if pipx refuses to upgrade a git install.) This restarts the panel only; the
 worker is never touched. From a source checkout: `git -C ~/imd-panel pull && systemctl --user restart imd-panel`.
 
+### Claude Code and OS updates
+
+Settings → worker updates also shows Claude Code (the worker only runs `claude -p`, which never updates itself):
+update it with a click or turn on its auto-update, and the worker restarts onto the new version between tasks.
+
+The OS side needs root once. On Ubuntu 24.04, from a source checkout:
+
+```sh
+sudo ~/imd-panel/system/install-auto-updates.sh
+```
+
+unattended-upgrades then also installs `noble-updates` (kernel included) and Tailscale every night at 02:00 UTC,
+and `imd-idle-reboot.timer` reboots when an update needs it, only between 03:00 and 06:00 UTC and only while no
+task is running. The panel shows pending packages, whether a reboot is needed and the last decision, and notifies.
+The installer copies the reboot script into `/usr/local/sbin`, so a later `git pull` never changes what root runs:
+re-run the installer to take a new version.
+
 ### Configuration (optional)
 
 Copy `panel.example.json` to `~/.config/imd-panel/panel.json` if your setup differs from the defaults:

@@ -1824,6 +1824,60 @@ def pass_claude(d):
     return d
 
 
+# ================================================================ OS updates (Settings → worker updates): read-only, root does the work
+# unattended-upgrades installs, imd-idle-reboot.timer reboots (system/install-auto-updates.sh); the panel only reports.
+IDLE_REBOOT_STATUS = "/var/lib/imd-idle-reboot/status.json"
+
+
+def _systemd_ts(v):
+    """systemctl show prints timer times as 'Thu 2026-10-08 06:48:18 UTC' and service ones as '@1791355647' with --timestamp=unix."""
+    v = (v or "").strip()
+    if v.startswith("@"):
+        return float(v[1:]) if v[1:].isdigit() else None
+    try:
+        return datetime.strptime(v, "%a %Y-%m-%d %H:%M:%S %Z").replace(tzinfo=timezone.utc).timestamp()
+    except ValueError:
+        return None
+
+
+def system_status():
+    out = {"os": None, "kernel": os.uname().release, "bootAt": None, "upgradable": [], "rebootRequired": os.path.exists("/run/reboot-required"),
+           "rebootPkgs": [], "timers": {}, "lastUpgrade": None, "idleReboot": None}
+    try:
+        out["os"] = re.search(r'PRETTY_NAME="([^"]+)"', open("/etc/os-release").read()).group(1)
+        out["bootAt"] = float(re.search(r"^btime (\d+)", open("/proc/stat").read(), re.M).group(1))
+        out["rebootPkgs"] = sorted(set(open("/run/reboot-required.pkgs").read().split()))
+    except (OSError, AttributeError):
+        pass
+    try:
+        apt = subprocess.run(["apt", "list", "--upgradable"], capture_output=True, text=True, timeout=60).stdout
+    except (OSError, subprocess.SubprocessError) as e:  # not a Debian/Ubuntu host
+        apt = ""; out["aptError"] = str(e)[:120]
+    for l in apt.splitlines():
+        m = re.match(r"([^/\s]+)/(\S+) (\S+) \S+ \[upgradable from: ([^\]]+)\]", l)
+        if m:
+            out["upgradable"].append({"name": m.group(1), "to": m.group(3), "from": m.group(4), "security": "-security" in m.group(2), "origin": m.group(2)})
+    r = subprocess.run(["systemctl", "show", "apt-daily-upgrade.timer", "imd-idle-reboot.timer", "apt-daily-upgrade.service", "-p", "Id", "-p", "NextElapseUSecRealtime",
+                        "-p", "ActiveState", "-p", "Result", "-p", "ExecMainExitTimestamp", "--timestamp=unix"], capture_output=True, text=True, timeout=30)
+    for block in r.stdout.strip().split("\n\n"):
+        kv = dict(l.split("=", 1) for l in block.splitlines() if "=" in l)
+        if kv.get("Id", "").endswith(".timer"):
+            out["timers"][kv["Id"]] = {"active": kv.get("ActiveState") == "active", "next": _systemd_ts(kv.get("NextElapseUSecRealtime"))}
+        elif kv.get("Id") == "apt-daily-upgrade.service":
+            out["lastUpgrade"] = {"at": _systemd_ts(kv.get("ExecMainExitTimestamp")), "result": kv.get("Result")}
+    try:
+        with open(IDLE_REBOOT_STATUS) as fh:
+            out["idleReboot"] = json.load(fh)
+    except (OSError, ValueError):
+        pass
+    return out
+
+
+def pass_system(d):
+    d["system"] = memo("system", 600, system_status)
+    return d
+
+
 # ================================================================ protocol additions of 2026-09-24: workflows, research panels, fuzz campaigns,
 # delivered results, the three services, per-seat fleet records (imd.fun/docs, control plane 0.1.0+f986ffe7)
 JOB_FINAL = ("completed", "cancelled", "blocked", "failed", "superseded")
@@ -2227,7 +2281,7 @@ def pass_media(d):
 
 
 # ================================================================ the pipeline: one base pass, then every enrichment in order
-PASSES = [pass_config, pass_explorer, pass_api, pass_swarm, pass_updates, pass_claude, pass_protocol, pass_oracle_status, pass_api_docs, pass_media]
+PASSES = [pass_config, pass_explorer, pass_api, pass_swarm, pass_updates, pass_claude, pass_system, pass_protocol, pass_oracle_status, pass_api_docs, pass_media]
 
 
 def collect():

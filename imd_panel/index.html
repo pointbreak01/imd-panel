@@ -670,6 +670,13 @@ section[data-tab="tasks"] .tscroll{max-height:calc(100vh - 150px)}
       <div class="msg" id="ccMsg"></div>
       <div id="ccState" class="muted" style="font-size:12px;margin-top:4px"></div>
       <details style="margin-top:8px"><summary class="muted">Claude Code update history</summary><div id="ccHist" class="muted" style="margin-top:6px;font-size:11.5px;line-height:1.7"></div></details>
+      <div class="form" style="margin-top:16px">
+        <span>system</span><span id="sysOs">…</span>
+        <span>OS updates</span><span id="sysPending">…</span>
+        <span>reboot</span><span id="sysReboot">…</span>
+        <span>automation</span><span id="sysAuto">…</span>
+      </div>
+      <details style="margin-top:8px"><summary class="muted">pending packages &amp; last unattended run</summary><div id="sysList" class="muted" style="margin-top:6px;font-size:11.5px;line-height:1.7"></div></details>
     </div>
   </div>
   <div class="mod">

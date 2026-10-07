@@ -136,6 +136,18 @@ def check(d, guard_state):
         for h in ((d.get("claudeCode") or {}).get("log") or [])[:3]:
             if h.get("action") == "failed" and now - (h.get("ts") or 0) < 3 * 3600:
                 once("claudefail:" + (h.get("note") or "")[:60], f"⚠️ <b>Claude Code update failed</b> · {h.get('note') or ''} — still on {h.get('from') or '?'}", 24 * 3600)
+    # 3d. OS updates: a reboot became necessary, the VPS came back from one, or the idle reboot keeps finding the worker busy
+    sy = d.get("system") or {}; ir = sy.get("idleReboot") or {}; boot = sy.get("bootAt")
+    if ev.get("worker") and boot:
+        if sy.get("rebootRequired"):
+            plan = "imd-idle-reboot does it %s once no task is running" % ir["window"] if ir.get("window") else "no automatic reboot installed (system/install-auto-updates.sh)"
+            once("rebootreq:%d" % boot, f"🔁 <b>VPS reboot needed</b> for {', '.join(sy.get('rebootPkgs') or []) or 'updates'} — {plan}", 10 ** 9)
+            if ir.get("requiredSince") and now - ir["requiredSince"] > 3 * 86400:
+                once("rebootstuck", f"⚠️ <b>VPS reboot pending for {int((now - ir['requiredSince']) / 86400)} days</b> — {ir.get('decision') or ''}", 24 * 3600)
+        if now - boot < 3 * 3600:
+            lr = ir.get("lastReboot") or {}
+            why = f" by imd-idle-reboot for {', '.join(lr.get('pkgs') or []) or 'updates'}" if lr.get("ts") and 0 < boot - lr["ts"] < 900 else ""
+            once("boot:%d" % boot, f"✅ <b>VPS rebooted</b> at {hm(boot)}{why} · kernel {sy.get('kernel') or '?'}", 10 ** 9)
     # 4. heartbeat / worker state
     la = d.get("lastAlive"); w = host.get("worker") or {}
     if ev.get("heartbeat") and la and now - la["ts"] > c["heartbeatMin"] * 60 and w.get("ActiveState") == "active":

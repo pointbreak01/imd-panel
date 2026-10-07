@@ -1,0 +1,118 @@
+#!/usr/bin/python3 -I
+"""imd-idle-reboot: reboot for pending updates only inside the night window and only while the IMD worker is idle.
+
+Run as root every 10 minutes by imd-idle-reboot.timer (installed by install-auto-updates.sh). Every run writes
+/var/lib/imd-idle-reboot/status.json, world-readable, which imd-panel shows under Settings → updates.
+`--dry-run` checks and writes the status but never stops the worker or reboots.
+"""
+import glob, json, os, pwd, subprocess, sys, time, urllib.request
+
+USER = os.environ.get("IMD_USER", "imd")
+UNIT = os.environ.get("IMD_WORKER_UNIT", "identitymd-worker.service")
+PANEL = os.environ.get("IMD_PANEL_URL", "http://127.0.0.1:8787")
+FROM, TO = int(os.environ.get("IMD_REBOOT_FROM", "3")), int(os.environ.get("IMD_REBOOT_TO", "6"))  # UTC hours, [FROM, TO)
+DIR = "/var/lib/imd-idle-reboot"
+STATUS = os.path.join(DIR, "status.json")
+UU_LOG = "/var/log/unattended-upgrades/unattended-upgrades.log"
+DRY = "--dry-run" in sys.argv
+
+
+def read_status():
+    try:
+        with open(STATUS) as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return {}
+
+
+def write_status(st):
+    os.makedirs(DIR, exist_ok=True); os.chmod(DIR, 0o755)
+    tmp = STATUS + ".tmp"
+    with open(tmp, "w") as fh:
+        json.dump(st, fh, indent=1)
+    os.chmod(tmp, 0o644); os.replace(tmp, STATUS)
+
+
+def claude_procs(home):
+    """Claude Code processes of the worker's user: their executable lives in ~/.local/share/claude/versions/ (native install)."""
+    root = os.path.join(home, ".local", "share", "claude", "versions") + "/"
+    n = 0
+    for p in glob.glob("/proc/[0-9]*/exe"):
+        try:
+            n += os.readlink(p).startswith(root)
+        except OSError:
+            pass
+    return n
+
+
+def panel_running():
+    """Running tasks as the panel counts them (it also sees a task before Claude starts); None when the panel is down.
+    Asked only inside the window with a reboot pending: any /api call counts as a page being open."""
+    try:
+        with urllib.request.urlopen(PANEL + "/api/lite", timeout=90) as r:
+            return len(json.load(r).get("running") or [])
+    except Exception:
+        return None
+
+
+def last_unattended():
+    """The outcome lines of the latest unattended-upgrades run (its log is root:adm 0640, so the panel cannot read it)."""
+    try:
+        with open(UU_LOG, errors="replace") as fh:
+            lines = fh.read().splitlines()[-400:]
+    except OSError:
+        return None
+    start = max((i for i, l in enumerate(lines) if "Starting unattended upgrades script" in l), default=None)
+    if start is None:
+        return None
+    keep = ("Packages that will be upgraded", "All upgrades installed", "No packages found", "ERROR", "WARNING", "Removing unused kernel")
+    return {"startedAt": lines[start][:19], "lines": [l[:400] for l in lines[start:] if any(k in l for k in keep)][-8:]}
+
+
+def user_systemctl(*args):
+    return subprocess.run(["systemctl", "--user", "-M", USER + "@", *args], capture_output=True, text=True, timeout=120)
+
+
+def main():
+    home = pwd.getpwnam(USER).pw_dir
+    st = read_status(); now = time.time(); hour = time.gmtime(now).tm_hour
+    required = os.path.exists("/run/reboot-required")
+    try:
+        with open("/run/reboot-required.pkgs") as fh:
+            pkgs = sorted(set(fh.read().split()))
+    except OSError:
+        pkgs = []
+    st.update(checkedAt=now, rebootRequired=required, pkgs=pkgs, window="%02d:00-%02d:00 UTC" % (FROM, TO), unattended=last_unattended())
+    if required:
+        st.setdefault("requiredSince", now)
+    else:
+        st.pop("requiredSince", None)
+    if not required:
+        st["decision"] = "no reboot needed"
+    elif not FROM <= hour < TO:
+        st["decision"] = "reboot needed, waiting for the %02d:00-%02d:00 UTC window" % (FROM, TO)
+    else:
+        procs = claude_procs(home); running = panel_running()
+        if procs or running:
+            st["decision"] = "reboot needed, worker busy (%d task(s), %d Claude process(es)); next check in 10 min" % (running or 0, procs)
+        elif DRY:
+            st["decision"] = "reboot needed and worker idle: would reboot now (dry run)"
+        else:
+            user_systemctl("stop", UNIT)  # no new task between the check and the reboot; the unit is enabled, so it starts at boot
+            time.sleep(5)
+            if claude_procs(home):
+                user_systemctl("start", UNIT)
+                st["decision"] = "a task started during the check; worker started again, next try in 10 min"
+            else:
+                st["lastReboot"] = {"ts": now, "pkgs": pkgs, "bootBefore": open("/proc/sys/kernel/random/boot_id").read().strip()}
+                st["decision"] = "rebooting for: " + (", ".join(pkgs) or "pending updates")
+                write_status(st)
+                print(st["decision"], flush=True)
+                subprocess.run(["systemctl", "reboot"])
+                return
+    write_status(st)
+    print(st["decision"])
+
+
+if __name__ == "__main__":
+    main()
