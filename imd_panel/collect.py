@@ -213,7 +213,8 @@ def transcripts():
     out = {}  # dir key -> {"group","task","sessions":[...]}
     for d in glob.glob(os.path.join(PROJECTS, "*identitymd-work*")):
         name = os.path.basename(d)
-        rest = name.split("identitymd-work-", 1)[1]
+        # a session run in the bare work dir has no "-<group>-<task>" suffix
+        rest = name.partition("identitymd-work")[2].lstrip("-") or "work"
         uuids = re.findall(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", rest)
         sessions = [parse_session(p) for p in glob.glob(os.path.join(d, "*.jsonl"))]
         sessions = [s for s in sessions if s["turns"] or s["start"] or s["limitHits"]]
@@ -835,7 +836,7 @@ def find_transcripts(short_id):
         return []
     paths = []
     for d in glob.glob(os.path.join(PROJECTS, "*identitymd-work*")):
-        rest = os.path.basename(d).split("identitymd-work-", 1)[1]
+        rest = os.path.basename(d).partition("identitymd-work")[2].lstrip("-") or "work"
         uuids = re.findall(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", rest)
         if any(u.startswith(short_id) for u in uuids) or (not uuids and rest.startswith(short_id)):
             paths += glob.glob(os.path.join(d, "*.jsonl"))
