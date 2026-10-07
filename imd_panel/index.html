@@ -650,7 +650,7 @@ section[data-tab="tasks"] .tscroll{max-height:calc(100vh - 150px)}
     </div>
   </div>
   <div class="mod">
-    <div class="lbl">03 · worker updates <span class="lr" id="updInfo"></span></div><div class="caption"><p>The daemon installs GitHub releases of <code>Identity-md/worker</code>. With auto-update on it checks every five minutes and installs while idle; off, you update from here. A rollback installs an older release with npm and turns auto-update off, otherwise the daemon would reinstall the latest within minutes.</p></div>
+    <div class="lbl">03 · worker updates <span class="lr" id="updInfo"></span></div><div class="caption"><p>The daemon installs GitHub releases of <code>Identity-md/worker</code>. With auto-update on it checks every five minutes and installs while idle; off, you update from here. A rollback installs an older release with npm and turns auto-update off, otherwise the daemon would reinstall the latest within minutes. Claude Code is updated the same way with <code>claude update</code>: the running tasks keep their version and the worker restarts onto the new one between tasks.</p></div>
     <div class="body">
       <div class="form">
         <span>installed</span><span id="updInstalled">…</span>
@@ -661,6 +661,15 @@ section[data-tab="tasks"] .tscroll{max-height:calc(100vh - 150px)}
       <div class="msg" id="updMsg"></div>
       <details style="margin-top:10px"><summary class="muted">release notes &amp; roll back</summary><div class="paper tscroll" style="max-height:40vh;margin-top:8px"><table id="updTable" class="wide"></table></div></details>
       <details style="margin-top:8px"><summary class="muted">update history</summary><div id="updHist" class="muted" style="margin-top:6px;font-size:11.5px;line-height:1.7"></div></details>
+      <div class="form" style="margin-top:16px">
+        <span>Claude Code</span><span id="ccInstalled">…</span>
+        <span>latest</span><span id="ccLatest">…</span>
+        <span>auto-update</span><span><label class="chk"><input type="checkbox" id="ccAuto"> <span id="ccAutoTxt">off</span></label> <small>tasks only run <code>claude -p</code>, which never updates itself</small></span>
+      </div>
+      <div class="btns"><button id="ccCheck">check now</button><button id="ccNow" class="primary">update Claude Code</button></div>
+      <div class="msg" id="ccMsg"></div>
+      <div id="ccState" class="muted" style="font-size:12px;margin-top:4px"></div>
+      <details style="margin-top:8px"><summary class="muted">Claude Code update history</summary><div id="ccHist" class="muted" style="margin-top:6px;font-size:11.5px;line-height:1.7"></div></details>
     </div>
   </div>
   <div class="mod">

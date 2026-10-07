@@ -37,6 +37,7 @@ def data(force=False):
             _cache["ts"] = time.time()
         d = dict(_cache["raw"]); d["guard"] = {"config": guard_cfg(), "state": _guard_state}; d["taskSig"] = task_sig(d)
         d["smart"] = {"config": smart_cfg(), "state": _smart_state}
+        if "claudeCode" in d: d["claudeCode"] = {**d["claudeCode"], "state": _claude_state}
         d["notify"] = {"config": notify.masked(notify.cfg()), "history": notify._hist[-10:]}
         return json.dumps(d, default=str).encode()
 
@@ -447,6 +448,89 @@ def act_update(body):
     raise ValueError("action must be check|update|rollback|autoUpdate|fetch")
 
 
+# ---------------------------------------------------------------- Claude Code updates: `claude update` on the native install
+# Running tasks keep the binary they started with (the installer only swaps the ~/.local/bin/claude symlink and
+# keeps older versions), so the update itself is safe mid-task; the worker is restarted between tasks so that it
+# advertises the new runtime version to the network.
+_claude_lock = threading.Lock()
+_claude_state = {"restartPendingSince": None, "pending": None, "lastTry": 0, "lastError": None}
+CLAUDE_RESTART_MAX_WAIT = 2 * 3600  # then release the running tasks: a restart cannot wait forever on a busy seat
+
+
+def save_claude_cfg(**kw):
+    c = {**collect.claude_update_cfg(), **kw}
+    tmp = collect.CLAUDE_UPDATE + ".tmp"
+    with open(tmp, "w") as fh: json.dump(c, fh, indent=1)
+    os.replace(tmp, collect.CLAUDE_UPDATE)
+    return c
+
+
+def claude_log(entry):
+    c = collect.claude_update_cfg()
+    save_claude_cfg(log=(c["log"] + [{"ts": time.time(), **entry}])[-30:])
+
+
+def claude_update(by):
+    """Run `claude update`; on a version change log it and queue a worker restart. Returns (from, to, output)."""
+    with _claude_lock:
+        _claude_state["lastTry"] = time.time()
+        before = collect.claude_install().get("version")
+        r = subprocess.run([collect.claude_bin(), "update"], capture_output=True, text=True, timeout=600, env=collect.imd_env())
+        out = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", (r.stdout or "") + (r.stderr or "")).strip()
+        collect._slow.pop("claude-install", None)
+        after = collect.claude_install().get("version")
+        if after != before:
+            claude_log({"by": by, "from": before, "to": after})
+            guard_log("claude code: %s → %s (%s)" % (before, after, by))
+            _claude_state.update(restartPendingSince=time.time(), lastError=None)
+        elif r.returncode:
+            _claude_state["lastError"] = out[-300:] or "claude update failed"
+            claude_log({"by": by, "action": "failed", "from": before, "note": _claude_state["lastError"][-160:]})
+        return before, after, out
+
+
+def claude_tick(d):
+    c = collect.claude_update_cfg(); cc = d.get("claudeCode") or {}; now = time.time(); st = _claude_state
+    # an update is retried at most every 6 h after a failure, hourly otherwise (the channel is read every 30 min)
+    if c["auto"] and cc.get("available") and now - st["lastTry"] > (6 * 3600 if st["lastError"] else 3600):
+        claude_update("auto-update")
+    since = st.get("restartPendingSince")
+    if not since:
+        return
+    started = collect.memo("worker-start", 30, collect.unit_started_at)
+    if (isinstance(started, float) and started > since) or worker_state() != "active":
+        st.update(restartPendingSince=None, pending=None); return  # restarted meanwhile, or stopped: it starts on the new version anyway
+    running = len(d.get("running") or [])
+    if running and now - since < CLAUDE_RESTART_MAX_WAIT:
+        st["pending"] = "worker restart waiting for %d running task(s)" % running; return
+    run(["systemctl", "--user", "restart", collect.UNIT])
+    guard_log("claude code: worker restarted onto %s%s" % (cc.get("installed", {}).get("version") or "the new version", " (%d task(s) released)" % running if running else ""))
+    st.update(restartPendingSince=None, pending=None)
+
+
+def act_claude(body):
+    action = body.get("action")
+    if action == "check":
+        collect._slow.pop("claude-releases", None); collect._slow.pop("claude-install", None)
+        cc = collect.pass_claude({})["claudeCode"]
+        if isinstance(cc["releases"], dict) and cc["releases"].get("error"):
+            raise ValueError("npm registry: " + cc["releases"]["error"])
+        return {"installed": cc["installed"].get("version"), "target": cc["target"], "available": cc["available"]}
+    if action == "update":
+        before, after, out = claude_update("dashboard")
+        if after == before and _claude_state["lastError"] and time.time() - _claude_state["lastTry"] < 5:
+            raise ValueError(_claude_state["lastError"])
+        return {"from": before, "to": after, "changed": after != before, "output": out[-600:]}
+    if action == "settings":
+        kw = {}
+        if "auto" in body: kw["auto"] = bool(body["auto"])  # the channel stays "latest": it is what `claude update` installs
+        c = save_claude_cfg(**kw)
+        if kw.get("auto"):
+            _claude_state["lastTry"] = 0  # act on the next tick, not in an hour
+        return {"auto": c["auto"], "channel": c["channel"]}
+    raise ValueError("action must be check|update|settings")
+
+
 # ---------------------------------------------------------------- budget guard
 GUARD_FILE = state("guard.json")
 GUARD_DEFAULT = {"enabled": False, "sessionPct": 90, "weeklyPct": 0, "windowTokens": 0, "windowCost": 0, "dailyCost": 0, "waitForIdle": True, "resumeAtReset": True}
@@ -530,6 +614,10 @@ def guard_loop():
             smart_tick(json.loads(data()))
         except Exception as e:
             guard_log("smart premium error: %s" % str(e)[:200])
+        try:
+            claude_tick(json.loads(data()))
+        except Exception as e:
+            guard_log("claude code update error: %s" % str(e)[:200])
         try:
             notify.check(json.loads(data()), _guard_state)
         except Exception as e:
@@ -689,7 +777,7 @@ def act_notify(body):
     return {"notify": notify.masked(c), **res}
 
 
-ACTIONS = {"/api/update": act_update, "/api/doctor": act_doctor, "/api/notify": act_notify, "/api/config": act_config, "/api/skills": act_skills, "/api/worker": act_worker, "/api/cleanup": act_cleanup, "/api/guard": act_guard}
+ACTIONS = {"/api/update": act_update, "/api/claude": act_claude, "/api/doctor": act_doctor, "/api/notify": act_notify, "/api/config": act_config, "/api/skills": act_skills, "/api/worker": act_worker, "/api/cleanup": act_cleanup, "/api/guard": act_guard}
 
 
 def serve(port=None):

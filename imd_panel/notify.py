@@ -128,6 +128,14 @@ def check(d, guard_state):
         for h in ((d.get("updates") or {}).get("history") or [])[:6]:
             if h.get("action") == "failed" and now - (h.get("ts") or 0) < 3 * 3600:
                 once("updfail:" + (h.get("note") or "")[:60], f"⚠️ <b>Worker update failed</b> · {h.get('note') or ''} — still on {((d.get('updates') or {}).get('installed') or {}).get('build') or '?'}", 24 * 3600)
+    # 3c. Claude Code updated by the panel (and the worker restarted onto it), or an update that failed
+    if ev.get("worker"):
+        for l in (guard_state.get("log") or [])[-5:]:
+            if l["msg"].startswith("claude code") and now - l["ts"] < 600:
+                once("claude:%d" % int(l["ts"]), f"{'⚠️' if 'error' in l['msg'] else '⬆️'} <b>Claude Code</b> at {hm(l['ts'])}\n{l['msg'].split(': ', 1)[-1]}", 10 ** 9)
+        for h in ((d.get("claudeCode") or {}).get("log") or [])[:3]:
+            if h.get("action") == "failed" and now - (h.get("ts") or 0) < 3 * 3600:
+                once("claudefail:" + (h.get("note") or "")[:60], f"⚠️ <b>Claude Code update failed</b> · {h.get('note') or ''} — still on {h.get('from') or '?'}", 24 * 3600)
     # 4. heartbeat / worker state
     la = d.get("lastAlive"); w = host.get("worker") or {}
     if ev.get("heartbeat") and la and now - la["ts"] > c["heartbeatMin"] * 60 and w.get("ActiveState") == "active":

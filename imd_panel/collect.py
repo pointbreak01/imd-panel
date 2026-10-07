@@ -1764,6 +1764,66 @@ def pass_updates(d):
     return d
 
 
+# ================================================================ Claude Code updates (Settings → worker updates)
+# Every task runs `claude -p`, and headless runs never update themselves (here ~/.claude.json even has
+# autoUpdates: false), so the native install stays where it was set up unless the panel moves it on.
+CLAUDE_VERSIONS = os.path.join(HOME, ".local", "share", "claude", "versions")
+CLAUDE_UPDATE = state("claude-update.json")
+CLAUDE_UPDATE_DEFAULT = {"auto": False, "channel": "latest", "log": []}
+
+
+def claude_bin():
+    return os.path.join(HOME, ".local", "bin", "claude")
+
+
+def version_key(v):
+    return tuple(int(p) for p in re.findall(r"\d+", v or "")[:3]) or (0,)
+
+
+def claude_update_cfg():
+    try:
+        with open(CLAUDE_UPDATE) as fh:
+            return {**CLAUDE_UPDATE_DEFAULT, **json.load(fh)}
+    except (OSError, ValueError):
+        return dict(CLAUDE_UPDATE_DEFAULT, log=[])
+
+
+def claude_install():
+    """The version ~/.local/bin/claude points at (native install: a symlink into versions/) and the versions kept beside it."""
+    out = {"bin": claude_bin(), "version": None, "installedAt": None, "kept": []}
+    target = os.path.realpath(claude_bin())
+    if os.path.dirname(target) == CLAUDE_VERSIONS:
+        out["version"] = os.path.basename(target); out["installedAt"] = os.path.getmtime(target)
+    else:
+        try:
+            r = subprocess.run([claude_bin(), "--version"], capture_output=True, text=True, timeout=30, env=imd_env())
+            out["version"] = (re.search(r"\d+\.\d+\.\d+", r.stdout) or [None])[0]
+        except (OSError, subprocess.SubprocessError) as e:
+            out["error"] = str(e)[:120]
+    if os.path.isdir(CLAUDE_VERSIONS):
+        out["kept"] = sorted((f for f in os.listdir(CLAUDE_VERSIONS) if re.fullmatch(r"\d+\.\d+\.\d+", f)), key=version_key)
+    return out
+
+
+def claude_releases():
+    """The npm dist-tags of @anthropic-ai/claude-code: the native installer follows the same latest / stable channels."""
+    req = urllib.request.Request("https://registry.npmjs.org/-/package/@anthropic-ai/claude-code/dist-tags", headers={"User-Agent": "imd-panel/1"})
+    with urllib.request.urlopen(req, timeout=20) as r:
+        tags = json.loads(r.read().decode())
+    return {"latest": tags.get("latest"), "stable": tags.get("stable"), "fetchedAt": time.time()}
+
+
+def pass_claude(d):
+    cfg = claude_update_cfg()
+    inst = memo("claude-install", 60, claude_install)
+    rel = memo("claude-releases", 1800, claude_releases)
+    want = rel.get(cfg["channel"]) if isinstance(rel, dict) else None
+    d["claudeCode"] = {"installed": inst, "releases": rel, "channel": cfg["channel"], "target": want, "auto": cfg["auto"],
+                       "available": bool(want and inst.get("version") and version_key(want) > version_key(inst["version"])),
+                       "log": cfg["log"][-10:][::-1]}
+    return d
+
+
 # ================================================================ protocol additions of 2026-09-24: workflows, research panels, fuzz campaigns,
 # delivered results, the three services, per-seat fleet records (imd.fun/docs, control plane 0.1.0+f986ffe7)
 JOB_FINAL = ("completed", "cancelled", "blocked", "failed", "superseded")
@@ -2167,7 +2227,7 @@ def pass_media(d):
 
 
 # ================================================================ the pipeline: one base pass, then every enrichment in order
-PASSES = [pass_config, pass_explorer, pass_api, pass_swarm, pass_updates, pass_protocol, pass_oracle_status, pass_api_docs, pass_media]
+PASSES = [pass_config, pass_explorer, pass_api, pass_swarm, pass_updates, pass_claude, pass_protocol, pass_oracle_status, pass_api_docs, pass_media]
 
 
 def collect():
