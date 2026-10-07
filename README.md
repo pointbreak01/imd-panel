@@ -192,10 +192,11 @@ worker is never touched. From a source checkout: `git -C ~/imd-panel pull && sys
 Settings → worker updates also shows Claude Code (the worker only runs `claude -p`, which never updates itself):
 update it with a click or turn on its auto-update, and the worker restarts onto the new version between tasks.
 
-The OS side needs root once. On Ubuntu 24.04, from a source checkout:
+The OS side needs root once. On Ubuntu 24.04, from a source checkout (the checkout's owner is taken as the
+worker's user, so it also works when you sudo from a separate admin account):
 
 ```sh
-sudo ~/imd-panel/system/install-auto-updates.sh
+sudo /home/<worker user>/imd-panel/system/install-auto-updates.sh
 ```
 
 unattended-upgrades then also installs `noble-updates` (kernel included) and Tailscale every night at 02:00 UTC,

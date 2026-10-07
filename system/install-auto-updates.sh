@@ -9,7 +9,8 @@
 set -euo pipefail
 [ "$(id -u)" = 0 ] || { echo "run it with sudo" >&2; exit 1; }
 HERE=$(cd "$(dirname "$0")" && pwd)
-U=${IMD_USER:-${SUDO_USER:-imd}}
+# the worker's user owns this checkout; SUDO_USER may be a separate admin account
+U=${IMD_USER:-$(stat -c %U "$HERE")}
 id "$U" >/dev/null
 
 install -o root -g root -m 755 "$HERE/imd-idle-reboot" /usr/local/sbin/imd-idle-reboot
