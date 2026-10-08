@@ -642,9 +642,10 @@ _last_prune = [time.time()]  # first prune a day after start, not at boot
 
 
 # ---------------------------------------------------------------- smart premium: Fable while its weekly limit lasts, a fallback after
-# Claude's usage endpoint reports the Fable-only weekly meter as `weekly_scoped` (100% / active while
-# every Fable run ends in "You've reached your Fable limit"). Each such bounce costs the worker 5 minutes
-# of intake, so once Fable is out the premium tier moves to the fallback, and back at the meter's reset.
+# Claude's usage endpoint reports the Fable-only weekly meter as `weekly_scoped`: 100% while every Fable
+# run ends in "You've reached your Fable limit". Its `is_active` flag only says the meter applies to the
+# account (it is true at 4% too), so it never means "out". Each bounce costs the worker 5 minutes of
+# intake, so once Fable is out the premium tier moves to the fallback, and back at the meter's reset.
 SMART_FILE = state("smart.json")
 SMART_DEFAULT = {"enabled": False, "fallback": {"model": "claude-opus-5-5", "effort": "high"}, "maxWaitMin": 30, "backAfter": None}
 RE_FABLE_LIMIT = re.compile(r"fable.{0,20}limit", re.I)
@@ -689,7 +690,7 @@ def _smart_tick(d):
     on_fallback = bool(cur) and cur.get("model") != collect.PREMIUM_MODEL
     u = d.get("usage") or {}
     scoped = next((l for l in u.get("limits") or [] if l.get("kind") == "weekly_scoped"), None)
-    out = bool(scoped) and (bool(scoped.get("active")) or (scoped.get("pct") or 0) >= 100)
+    out = bool(scoped) and (scoped.get("pct") or 0) >= 100
     st.update(fableOut=out if scoped else None, fablePct=scoped.get("pct") if scoped else None, fableResetsAt=scoped.get("resetsAt") if scoped else None)
     started = collect.memo("worker-start", 30, collect.unit_started_at)
     started = started if isinstance(started, float) else None
