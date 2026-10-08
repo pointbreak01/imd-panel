@@ -5,7 +5,7 @@ from .paths import state
 FILE = state("notify.json")
 STATE = state("notify.state.json")
 DEFAULT = {"telegramToken": "", "telegramChatId": "", "webhookUrl": "",
-           "events": {"limit": True, "guard": True, "heartbeat": True, "worker": True, "rejected": True, "disk": True, "released": True, "daily": True, "standing": True, "wasted": True, "api": True},
+           "events": {"limit": True, "guard": True, "heartbeat": True, "worker": True, "rejected": True, "disk": True, "released": True, "daily": True, "standing": True, "wasted": True, "api": True, "task": True, "accepted": True},
            "heartbeatMin": 5, "diskGB": 10, "dailyHourUTC": 8}
 _hist = []  # (ts, text) recent sends for the UI
 
@@ -180,6 +180,30 @@ def check(d, guard_state):
     disk = host.get("disk") or {}
     if ev.get("disk") and disk.get("free") and disk["free"] < c["diskGB"] * 1024 ** 3:
         once("disk", f"💽 <b>Low disk</b>: {disk['free'] / 1024**3:.1f} GB free", 24 * 3600)
+    # 6b. work taken and work accepted: one message each per 5 minutes at most (an oracle burst is thirty tasks an hour),
+    # listing everything new since the last one; ids are remembered so nothing is told twice or missed between ticks
+    T = [t for t in d.get("tasks", []) if t.get("status") != "no-journal" and t.get("kind") not in ("doctor", "untracked")]
+    wr = st.get("work")
+    if not wr:  # first run: start from now, don't replay the task list
+        wr = st["work"] = {"seen": {t["id"]: now for t in T}, "acc": {t["id"]: now for t in T if t.get("verdict") == "accepted"}, "sentTasks": now, "sentAcc": now}
+    model = lambda t: "%s %s" % ({"claude-fable-5-1": "Fable", "claude-opus-5-5": "Opus 5.5", "claude-opus-5": "Opus 5", "claude-sonnet-5": "Sonnet 5"}.get(t.get("model"), t.get("model") or "?"), t.get("effort") or "")
+    if ev.get("task") and now - wr["sentTasks"] >= 300:
+        new = [t for t in T if t["id"] not in wr["seen"]]
+        if new:
+            new.sort(key=lambda t: t.get("acceptedAt") or 0)
+            out.append("🧾 <b>%d new task%s</b>\n" % (len(new), "s" if len(new) > 1 else "") + "\n".join("• %s · %s · %s" % (t.get("kindLabel") or t.get("kind") or "", model(t).strip(), (t.get("title") or "")[:70]) for t in new[-12:]))
+            wr["sentTasks"] = now
+        for t in new: wr["seen"][t["id"]] = now
+    if ev.get("accepted") and now - wr["sentAcc"] >= 300:
+        new = [t for t in T if t.get("verdict") == "accepted" and t["id"] not in wr["acc"]]
+        if new:
+            new.sort(key=lambda t: t.get("acceptedAt") or 0)
+            cost = sum(t.get("costUSD") or 0 for t in new)
+            out.append("✅ <b>%d accepted</b> · $%.2f API-eq\n" % (len(new), cost) + "\n".join("• %s · %s · $%.2f · %d min · %s" % (t.get("kindLabel") or t.get("kind") or "", model(t).strip(), t.get("costUSD") or 0, (t.get("durationS") or 0) // 60, (t.get("title") or "")[:60]) for t in new[-12:]))
+            wr["sentAcc"] = now
+        for t in new: wr["acc"][t["id"]] = now
+    for k in ("seen", "acc"):  # forget ids older than two weeks; the task list itself is shorter than that
+        wr[k] = {i: ts for i, ts in wr[k].items() if now - ts < 14 * 86400}
     # 7. daily digest
     if ev.get("daily"):
         g = time.gmtime(now)

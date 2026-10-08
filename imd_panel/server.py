@@ -4,7 +4,7 @@ import gzip, glob, json, os, re, shutil, subprocess, sys, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from . import collect, notify, history, earnings
+from . import collect, notify, history, earnings, telegram
 from .paths import HERE, state
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", "8787"))
@@ -785,6 +785,7 @@ def serve(port=None):
     port = port or PORT
     if not os.environ.get("NO_GUARD"):  # a preview instance must not act on the worker
         threading.Thread(target=guard_loop, daemon=True).start()
+        telegram.start(sys.modules[__name__])  # answers the bot's commands; idle until a token is saved
     srv = ThreadingHTTPServer((HOST, port), H)
     print("imd-panel listening on http://%s:%d (state in %s)" % (HOST, port, state("")), flush=True)
     srv.serve_forever()

@@ -115,7 +115,8 @@ premium model, and every worker task is what it is. Everything else reads local 
 - The service: state, restarts, concurrency (config.json and unit), versions, restart / start / stop, clean old work dirs.
 - Worker updates: installed build, latest GitHub release, auto-update toggle, update now, release notes and a roll back button per release (archive downloaded and verified against SHA256SUMS, installed with npm, auto-update turned off), update history including releases the daemon refused.
 - Budget guard: stops the worker when the plan's 5 h or week utilisation passes a threshold (or a local token / dollar estimate), waits for running tasks, resumes at the reset, manual override.
-- Notifications: Telegram bot and / or HTTPS webhook; events: Claude limit hit, tasks released, work lost, guard paused / resumed, no heartbeat, service not active, task rejected, network standing, low disk, daily digest, API changed.
+- Notifications: Telegram bot and / or HTTPS webhook; events: Claude limit hit, tasks released, work lost, guard paused / resumed, no heartbeat, service not active, task rejected, network standing, low disk, daily digest, API changed, new tasks taken and tasks accepted (one message per five minutes each, listing what is new).
+- The Telegram bot answers too: `/status`, `/tasks`, `/earnings`, `/usage`, `/tiers`, `/system`, `/fleet`, `/log`, `/menu` (buttons), and acts: `/premium fable|opus|default|off`, `/smart on|off`, `/tier economy sonnet low`, `/concurrency 2`, `/guard 80`, `/restart`, `/stop`, `/resume`, `/update`, `/claude`, `/doctor`, `/notify <event> on|off`. Only the bound chat is answered; stop, restart and updates ask for a confirming tap.
 - Skills the machine accepts, toggled with `imd skills add/remove`.
 - In force: the resolved tier table, concurrency, opt-outs, guard and notifier summary. Service & versions: worker, Claude Code, node, server, token id, cleanup timer, config path, unit, ExecStart. API sentinel: documented routes on imd.fun/docs and the ones added since the last visit.
 - Tier history: an append-only log of which model answered which tier when, so a task never changes tier after the fact; copy or download as JSON.
@@ -220,7 +221,11 @@ Copy `panel.example.json` to `~/.config/imd-panel/panel.json` if your setup diff
 | `allowedHosts` | `[]` | extra host names the panel answers to besides `localhost`, `127.0.0.1` and `[::1]` (e.g. a `tailscale serve` name); any other Host is refused |
 
 Notifications (Telegram bot or HTTPS webhook) and the budget guard are configured from the Settings tab;
-they live in `notify.json` and `guard.json` in `~/.config/imd-panel/`.
+they live in `notify.json` and `guard.json` in `~/.config/imd-panel/`. To set the bot up: create one with
+@BotFather, paste its token into Settings → notifications, send the bot `/start` — unbound, it answers with the
+chat's id — and paste that id into Settings. From then on the panel long-polls Telegram (no inbound port, the
+VPS address never reaches the bot) and answers that chat alone; commands queued while the panel was down are
+dropped, and the poll offset lives in `telegram.state.json` so a restart never replays a `/restart`.
 
 ## How it works
 

@@ -695,11 +695,11 @@ section[data-tab="tasks"] .tscroll{max-height:calc(100vh - 150px)}
     </div>
   </div>
   <div class="mod">
-    <div class="lbl">05 · notifications</div><div class="caption"><p>A Telegram bot and/or an HTTPS webhook. Checked every 30 seconds; each event is sent once.</p></div>
+    <div class="lbl">05 · notifications</div><div class="caption"><p>A Telegram bot and/or an HTTPS webhook. Checked every 30 seconds; each event is sent once. The Telegram bot also answers: save the token, send it <code>/start</code> and it replies with the chat id to paste here; then <code>/help</code> lists the commands (status, tasks, earnings, usage, tiers, premium switch, guard, restart, updates, doctor).</p></div>
     <div class="body">
       <div class="form">
         <span>bot token</span><span><input id="nToken" type="password" placeholder="123456:ABC… (from @BotFather)" style="width:100%;max-width:360px" autocomplete="off"></span>
-        <span>chat id</span><span><input id="nChat" placeholder="e.g. 123456789 (from @userinfobot)" style="width:220px"></span>
+        <span>chat id</span><span><input id="nChat" placeholder="e.g. 123456789 (send /start to the bot)" style="width:220px"></span>
         <span>webhook</span><span><input id="nHook" placeholder="https://… (optional, JSON {text})" style="width:100%;max-width:360px"></span>
         <span>thresholds</span><span>heartbeat <input id="nHb" type="number" min="1" style="width:60px"> min · disk <input id="nDisk" type="number" min="1" style="width:60px"> GB · digest at <input id="nHour" type="number" min="0" max="23" style="width:60px">:00 UTC</span>
         <span>events</span><span class="skills" id="nEvents" style="max-height:none;grid-template-columns:repeat(auto-fill,minmax(200px,1fr))"></span>
