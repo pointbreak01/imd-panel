@@ -165,9 +165,10 @@ def v_earnings():
         out.append("\n" + B("worth claiming"))
         for x in sorted(live, key=lambda x: -(x.get("valueUsd") or 0))[:6]:
             out.append("• #%s %s · %.0f %s ≈ $%.2f · gas ≈ $%.2f" % (x.get("launchNumber"), E((x.get("token") or {}).get("symbol")), x.get("amount") or 0, E((x.get("token") or {}).get("symbol")), x.get("valueUsd") or 0, x.get("gasUsd") or 0))
+    chains = e.get("chains") or {}  # items carry the chain id; names live in the feed's chain table
     out.append("\nlast launches:")
     for x in items[:5]:
-        out.append("• #%s %s · %s · %s%s" % (x.get("launchNumber"), E((x.get("token") or {}).get("symbol")), E((x.get("chain") or {}).get("name")), E(x.get("status")), " ≈ $%.2f" % x["valueUsd"] if x.get("valueUsd") else ""))
+        out.append("• #%s %s · %s · %s%s" % (x.get("launchNumber"), E((x.get("token") or {}).get("symbol")), E((chains.get(str(x.get("chain"))) or {}).get("name") or x.get("chain")), E(x.get("status")), " ≈ $%.2f" % x["valueUsd"] if x.get("valueUsd") else ""))
     if e.get("pending"): out.append("(%d launch(es) still loading)" % e["pending"])
     if e.get("errors"): out.append("⚠️ " + E("; ".join(e["errors"])[:200]))
     out.append("claims are signed from the panel's Earnings tab (the bot holds no key)")
