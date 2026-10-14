@@ -4,11 +4,12 @@
 #
 #     sh ~/imd-panel/system/install-sandbox.sh            # write the settings, then probe them
 #     sh ~/imd-panel/system/install-sandbox.sh --probe    # probe only
+#     sh ~/imd-panel/system/install-sandbox.sh --no-probe # settings only
 #
 # What the settings do (sandbox section of ~/.claude/settings.json; the worker starts every task's Claude with
 # --setting-sources user, so they apply to every task):
 #   - every Bash command of every task runs under bubblewrap: the home directory is read-only except the task's
-#     own directory, /tmp and the build caches (npm, forge, solc, playwright); ~/.identitymd (except work/),
+#     own directory, /tmp (tasks keep scratch there; the sandbox's own temp dir is private) and the build caches (npm, forge, solc, playwright); ~/.identitymd (except work/),
 #     ~/.claude credentials, ~/.ssh, ~/.config and ~/.local/state cannot even be read — by any process, forge tests with
 #     ffi, npm scripts and node one-liners included, which the imd-task-guard hook alone cannot see
 #   - the network is a separate namespace: only the hosts in allowedDomains are reachable (public RPC providers, the
@@ -60,7 +61,7 @@ fs["denyRead"] = sorted(set(fs.get("denyRead") or []) | {"~/.identitymd", "~/.cl
                         "~/.claude/settings.json.*", "~/.ssh", "~/.config", "~/.local/state", "~/.bash_history", "~/.npmrc", "~/.gnupg",
                         "~/imd-panel", "~/imd-tools", "~/imd-rpc", "~/imd-dashboard", "~/backups"})
 fs["allowRead"] = sorted(set(fs.get("allowRead") or []) | {"~/.identitymd/work"})
-fs["allowWrite"] = sorted(set(fs.get("allowWrite") or []) | {"~/.npm", "~/.cache", "~/.foundry/cache", "~/.local/share/svm", "~/.local/share/vitest", "~/.local/share/pnpm"})
+fs["allowWrite"] = sorted(set(fs.get("allowWrite") or []) | {"/tmp", "/var/tmp", "~/.npm", "~/.cache", "~/.foundry/cache", "~/.local/share/svm", "~/.local/share/vitest", "~/.local/share/pnpm"})
 fs["denyWrite"] = sorted(set(fs.get("denyWrite") or []) | {"~/.cache/claude", "~/.cache/claude-cli-nodejs"})
 net = sb.setdefault("network", {})
 net["strictAllowlist"] = True
@@ -72,6 +73,7 @@ os.replace(tmp, p)
 print("   denyRead %d · allowRead %d · allowWrite %d · allowedDomains %d" % (len(fs["denyRead"]), len(fs["allowRead"]), len(fs["allowWrite"]), len(net["allowedDomains"])))
 EOF
 fi
+[ "${1:-}" = "--no-probe" ] && exit 0
 
 echo "2/2 probes: a small Claude session runs each command; the sandbox, not the model, decides what happens"
 command -v claude >/dev/null || { echo "claude is not on PATH"; exit 1; }
