@@ -215,6 +215,9 @@ def check(d, guard_state):
             body = "\n".join("• %s ×%d" % (k, v) for k, v in rules.items()) + "\n<code>%s</code>" % (fresh[0].get("text") or "")[:160].replace("<", "&lt;")
             once("blocked:%d" % int(fresh[0]["ts"]), head + "\n" + body + "\nThe brief asked for host commands: the task will answer false or stop. See Settings → 12 · security.", 10 ** 9)
             for r in fresh: seen["blocked:%d" % int(r.get("ts") or 0)] = now
+    fw = sec.get("firewall") or {}
+    if ev.get("blocked") and fw.get("ufw") not in (None, "active"):
+        once("ufw:" + str(fw.get("ufw")), "🔥 <b>Firewall (ufw) is %s</b> — listeners off loopback: %s" % (fw.get("ufw"), ", ".join(fw.get("exposed") or []) or "none"), 6 * 3600)
     if ev.get("blocked") and not sec.get("ok") and sec.get("hook") is not None:
         once("guard-missing", "⚠️ <b>Task guard incomplete</b>: hook %s · settings hook %s · deny rules %s · CLAUDE.md lesson %s — run system/install-task-guard.sh" % (sec.get("hook"), "on" if sec.get("hooked") else "off", sec.get("denyRules"), "yes" if sec.get("lesson") else "no"), 24 * 3600)
     # 7. daily digest

@@ -105,6 +105,29 @@ def status():
             "ok": hook == "current" and hooked and len(deny) > 0 and lesson}
 
 
+def firewall():
+    """Is the host firewall up, and which listeners sit on a non-loopback address? A keyed relay bound to the public IP
+    (so sandboxed tasks can reach it) relies on ufw dropping inbound traffic; this is the panel's eye on that."""
+    out = {"ufw": None, "exposed": []}
+    try:
+        out["ufw"] = subprocess.run(["systemctl", "is-active", "ufw"], capture_output=True, text=True, timeout=10).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        pass
+    try:
+        for ln in subprocess.run(["ss", "-ltnH"], capture_output=True, text=True, timeout=10).stdout.splitlines():
+            parts = ln.split()
+            if len(parts) < 4:
+                continue
+            addr = parts[3]
+            host = addr.rsplit(":", 1)[0].strip("[]")
+            if host not in ("127.0.0.1", "::1", "localhost") and not host.startswith("127."):
+                out["exposed"].append(addr)
+    except (OSError, subprocess.SubprocessError):
+        pass
+    out["ok"] = out["ufw"] == "active"
+    return out
+
+
 def worker_jail(unit):
     """The worker's own verdict on the sandbox at its last start: since worker 0.1.2 it logs 'oracle work is off on this
     machine: <why>' when Claude's sandbox cannot start, and nothing when it can."""
@@ -124,4 +147,4 @@ def worker_jail(unit):
 
 def data():
     from . import collect
-    return {**status(), "workerJail": worker_jail(collect.UNIT), "blocked": blocked()}
+    return {**status(), "workerJail": worker_jail(collect.UNIT), "firewall": firewall(), "blocked": blocked()}

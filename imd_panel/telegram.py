@@ -210,6 +210,7 @@ def v_security(d):
              "hook %s · settings hook %s · deny rules %s · CLAUDE.md lesson %s · api token %s" % (E(s.get("hook") or "?"), "on" if s.get("hooked") else "off", s.get("denyRules", "?"), "yes" if s.get("lesson") else "no", "set" if s.get("tokenSet") else "none"),
              "sandbox: %s" % ("on · bwrap %s · %s hosts · %s denyRead" % ("ok" if (s.get("sandbox") or {}).get("bwrap") else "MISSING", (s.get("sandbox") or {}).get("domains"), (s.get("sandbox") or {}).get("denyRead")) if (s.get("sandbox") or {}).get("enabled") else "off"),
              "worker jail: %s" % ({"ok": "ok, oracle work on", "off": "OFF — " + ((s.get("workerJail") or {}).get("detail") or "")[:120]}.get((s.get("workerJail") or {}).get("state"), "unknown")),
+             "firewall: ufw %s · off-loopback listeners: %s" % ((s.get("firewall") or {}).get("ufw") or "?", ", ".join((s.get("firewall") or {}).get("exposed") or []) or "none"),
              "blocked calls: %s all time · %s in 24 h" % (b.get("total", 0), b.get("day", 0))]
     for r in (b.get("recent") or [])[:8]:
         lines.append("• %s %s · %s · %s\n  <code>%s</code>" % (hm(r.get("ts")), E(r.get("tool") or ""), E(r.get("rule") or ""), E((r.get("task") or "")[:30]), E((r.get("text") or "")[:120])))
