@@ -204,6 +204,16 @@ def v_fleet(d):
     return "\n".join(out)
 
 
+def v_security(d):
+    s = d.get("security") or {}; b = s.get("blocked") or {}
+    lines = ["%s %s" % ("🛡" if s.get("ok") else "⚠️", B("task guard " + ("complete" if s.get("ok") else "incomplete"))),
+             "hook %s · settings hook %s · deny rules %s · CLAUDE.md lesson %s · api token %s" % (E(s.get("hook") or "?"), "on" if s.get("hooked") else "off", s.get("denyRules", "?"), "yes" if s.get("lesson") else "no", "set" if s.get("tokenSet") else "none"),
+             "blocked calls: %s all time · %s in 24 h" % (b.get("total", 0), b.get("day", 0))]
+    for r in (b.get("recent") or [])[:8]:
+        lines.append("• %s %s · %s · %s\n  <code>%s</code>" % (hm(r.get("ts")), E(r.get("tool") or ""), E(r.get("rule") or ""), E((r.get("task") or "")[:30]), E((r.get("text") or "")[:120])))
+    return "\n".join(lines)
+
+
 def v_log(d, n=12):
     ev = (d.get("events") or [])[-n:]
     out = [B("worker log")] + ["%s %s" % (hm(e.get("ts")), E((e.get("msg") or "")[:110])) for e in reversed(ev)]
@@ -234,7 +244,8 @@ HELP = """<b>imd-panel bot</b>
 /concurrency 1-4 · /guard &lt;pct&gt;|on|off — budget guard
 /restart · /stop · /start — the worker (restart/stop ask to confirm)
 /update · /claude — install the latest worker / Claude Code (confirm)
-/doctor — imd doctor (takes a minute) · /notify [event on|off]"""
+/doctor — imd doctor (takes a minute) · /notify [event on|off]
+/security — task guard status and the last blocked calls · /token [new] — the panel's API token"""
 
 
 # ---------------------------------------------------------------- actions
@@ -370,6 +381,12 @@ def handle(cmd, arg, chat):
     if cmd == "system": return v_system(D()), MENU
     if cmd == "fleet": return v_fleet(D()), MENU
     if cmd == "log": return v_log(D()), MENU
+    if cmd == "security": return v_security(D()), MENU
+    if cmd == "token":
+        from . import security
+        if (arg or "").strip() == "new":
+            t = security.new_token(); return "new panel token (every open page must enter it again):\n<code>%s</code>" % E(t), MENU
+        return "panel token — open the panel as <code>http://127.0.0.1:&lt;port&gt;/#token=…</code> once, it remembers it:\n<code>%s</code>\n/token new rotates it" % E(security.token()), MENU
     if cmd == "earnings": slow(chat, "reading the chain", v_earnings); return None, None
     if cmd == "doctor": slow(chat, "running imd doctor", a_doctor); return None, None
     if cmd == "premium":
@@ -472,7 +489,7 @@ COMMANDS = [("status", "worker, seat, usage, tiers at a glance"), ("tasks", "las
             ("smart", "smart premium on | off"), ("system", "VPS, updates, memory, disk"), ("fleet", "rank and the network"), ("log", "last worker events"),
             ("restart", "restart the worker (confirm)"), ("stop", "stop the worker (confirm)"), ("resume", "start the worker"), ("update", "install the latest worker release"),
             ("claude", "update Claude Code"), ("doctor", "run imd doctor"), ("guard", "pause threshold, on | off"), ("concurrency", "tasks at once, 1-4"),
-            ("tier", "economy | standard model and effort"), ("notify", "event toggles"), ("menu", "buttons"), ("help", "all commands")]
+            ("tier", "economy | standard model and effort"), ("notify", "event toggles"), ("security", "task guard and blocked calls"), ("token", "panel API token"), ("menu", "buttons"), ("help", "all commands")]
 
 
 def start(server):

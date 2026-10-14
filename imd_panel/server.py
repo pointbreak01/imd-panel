@@ -4,7 +4,7 @@ import gzip, glob, json, os, re, shutil, subprocess, sys, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from . import collect, notify, history, earnings, telegram
+from . import collect, notify, history, earnings, telegram, security
 from .paths import HERE, state
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", "8787"))
@@ -69,6 +69,11 @@ class H(BaseHTTPRequestHandler):
                 return False
         return True
 
+    def authed(self):
+        """Every /api/ request carries the panel token (X-Panel-Token). Localhost alone proves nothing: a task the worker
+        runs is a process on this same machine, and the 13-14 Oct 2026 attack had tasks curl this very port."""
+        return security.token_ok(self.headers.get("X-Panel-Token"))
+
     def send(self, code, ctype, body, cache="no-store"):
         # gzip text bodies over 2 KB when the client accepts it (the data feed is ~1.7 MB raw, ~220 KB gzipped)
         if len(body) > 2048 and "gzip" in (self.headers.get("Accept-Encoding") or "") and ctype.split(";")[0] in ("application/json", "text/html", "text/plain", "text/javascript", "text/css", "image/svg+xml"):
@@ -91,6 +96,8 @@ class H(BaseHTTPRequestHandler):
     def do_POST(self):
         if not self.trusted(write=True):
             return self.send(403, "application/json", b'{"error":"forbidden"}')
+        if not self.authed():
+            return self.send(401, "application/json", b'{"error":"token"}')
         try:
             n = int(self.headers.get("Content-Length") or 0)
         except ValueError:
@@ -120,6 +127,8 @@ class H(BaseHTTPRequestHandler):
         if not self.trusted():
             return self.send(403, "text/plain", b"forbidden: open the panel as localhost or 127.0.0.1 (or add the name to allowedHosts in panel.json)")
         path = self.path.split("?", 1)[0]
+        if path.startswith("/api/") and not self.authed():  # the page and its assets are static; everything with data needs the token
+            return self.send(401, "application/json", b'{"error":"token"}')
         if path in ("/", "/index.html"):
             with open(os.path.join(HERE, INDEX), "rb") as fh:
                 return self.send(200, "text/html; charset=utf-8", fh.read())

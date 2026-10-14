@@ -1,4 +1,13 @@
 const $=s=>document.querySelector(s);
+// the panel's API token: #token=… in the URL once (then removed), kept in localStorage, sent with every /api/ request.
+// A 401 means the token is missing or was rotated (/token new): the page asks for it and reloads.
+const TOK={get(){try{return localStorage.getItem("panelToken")||""}catch(e){return ""}},set(t){try{localStorage.setItem("panelToken",t)}catch(e){}}};
+try{const m=location.hash.match(/token=([A-Za-z0-9_-]+)/);if(m){TOK.set(m[1]);history.replaceState(null,"",location.pathname+location.search)}}catch(e){}
+const _fetch=window.fetch.bind(window);
+window.fetch=(u,o)=>{const url=typeof u==="string"?u:u.url||"";if(!url.startsWith("/api/"))return _fetch(u,o);o=Object.assign({},o||{});o.headers=Object.assign({},o.headers||{},{"X-Panel-Token":TOK.get()});
+  return _fetch(u,o).then(r=>{if(r.status===401)askToken();return r})};
+let asking=false;
+function askToken(){if(asking)return;asking=true;const t=prompt("Panel token (on the VPS: imd-panel token, or /token in Telegram).\nOpening http://127.0.0.1:<port>/#token=… once also works.");asking=false;if(t&&t.trim()){TOK.set(t.trim());location.reload()}else{const s=$("#state");if(s)s.textContent="no token — reload to enter it"}}
 // one colour per model (--s1…--s5); url(#p-…) fills (SVG patterns at the top of <body>) stay available via bgc()
 const MODELS={"claude-opus-5-5":{c:"var(--s5)",cls:"m5",n:"Opus 5.5"},"claude-opus-5":{c:"var(--s1)",cls:"m1",n:"Opus 5"},"claude-sonnet-5":{c:"var(--s2)",cls:"m2",n:"Sonnet 5"},"claude-fable-5-1":{c:"var(--s3)",cls:"m3",n:"Fable 5.1"}};
 // the same fill as a CSS background (legend swatches, tooltips)
@@ -54,7 +63,7 @@ function render(){
   else if(D.journalError){b.style.display="block";b.className="banner lamp";b.textContent="journal unavailable: "+D.journalError}else b.style.display="none";
   renderNet(la,disc);
   const al=$("#agentLink");if(D.explorer&&D.explorer.agentUrl){al.href=D.explorer.agentUrl;const a=D.explorer.agent;al.textContent=a?`#${D.explorer.tokenId} · ${a.accepted}/${a.attempts} ↗`:`#${D.explorer.tokenId} ↗`;al.title=a?`agent #${D.explorer.tokenId} on the explorer · ${a.accepted} of ${a.attempts} attempts accepted`:"agent page on the explorer"}
-  renderDaily();renderRunning();renderPanel();renderPower();renderGuard();renderNotify();renderEpisodes();renderByModel();fillFilters();renderTasks();renderFeed();renderConfig();renderService();renderEffective();renderTierLog();renderMedia();renderTraffic();syncScroll();
+  renderDaily();renderRunning();renderPanel();renderPower();renderGuard();renderNotify();renderEpisodes();renderByModel();fillFilters();renderTasks();renderFeed();renderConfig();renderService();renderEffective();renderTierLog();renderMedia();renderTraffic();renderSecurity();syncScroll();
 }
 // network banner: a host the panel reads from is down (circuit breaker in collect.http_get) and/or the worker says it is disconnected
 function renderNet(la,disc){
@@ -75,7 +84,7 @@ function renderGuard(){
 }
 $("#gSave").onclick=async()=>{say("gMsg","saving…");try{await post("/api/guard",{enabled:$("#gEnabled").checked,sessionPct:+$("#gSession").value,weeklyPct:+$("#gWeekly").value,windowTokens:+$("#gTokens").value,windowCost:+$("#gCost").value,dailyCost:+$("#gDaily").value,waitForIdle:$("#gIdle").checked,resumeAtReset:$("#gResume").checked});say("gMsg","guard saved","ok");load(true)}catch(e){say("gMsg",e.message,"err")}};
 $("#gResumeNow").onclick=async()=>{say("gMsg","resuming…");try{await post("/api/guard",{resumeNow:true});say("gMsg","worker resumed; guard overridden for 1h","ok");setTimeout(()=>load(true),3000)}catch(e){say("gMsg",e.message,"err")}};
-const EVN={limit:"Claude session limit hit",released:"tasks released on rate limit",guard:"budget guard paused / resumed",heartbeat:"no worker heartbeat",worker:"worker service not active",rejected:"task rejected by the network",standing:"network standing: dispatch pause, breaker, failures",disk:"low disk space",daily:"daily digest",wasted:"work lost: task released after real work",api:"imd.fun API gained routes",task:"new tasks taken (one message per 5 min)",accepted:"tasks accepted (one message per 5 min)"};
+const EVN={limit:"Claude session limit hit",released:"tasks released on rate limit",guard:"budget guard paused / resumed",heartbeat:"no worker heartbeat",worker:"worker service not active",rejected:"task rejected by the network",standing:"network standing: dispatch pause, breaker, failures",disk:"low disk space",daily:"daily digest",wasted:"work lost: task released after real work",api:"imd.fun API gained routes",task:"new tasks taken (one message per 5 min)",accepted:"tasks accepted (one message per 5 min)",blocked:"task guard blocked a hostile tool call"};
 function renderNotify(){
   const N=D.notify||{},c=N.config||{};const setIf=(id,v)=>{const el=$("#"+id);if(document.activeElement!==el&&!el.dataset.dirty)el.value=v??""};
   if(!$("#nToken").dataset.dirty&&document.activeElement!==$("#nToken"))$("#nToken").placeholder=c.telegramToken?`saved (${c.telegramToken}) — empty keeps it, "off" removes it`:"123456:ABC… (from @BotFather)";
@@ -341,6 +350,15 @@ function renderMedia(){
     ((I.recent||[]).length?`<div class="tscroll"><table class="wide"><tr><th>when (UTC)</th><th></th><th>cost</th><th>file</th><th>prompt / error</th></tr>`+I.recent.map(x=>`<tr><td>${x.ts?dt(x.ts):"?"}</td><td><span class="tag ${x.status==="ok"?"ok":"alarm"}">${esc(x.status)}</span></td><td>${cost(x.cost)}</td><td>${x.job?`<a href="https://explorer.imd.fun/jobs/${encodeURIComponent(x.job)}" target="_blank" rel="noopener">${esc(x.path||x.job)}</a>`:esc(x.path||"")}</td><td title="${esc(x.prompt||x.error||"")}">${esc((x.prompt||x.error||"").slice(0,110))}</td></tr>`).join("")+"</table></div>"
       :`<p class="muted">${I.logPresent?"no calls logged":"no image generated yet: the log appears with the first call"}.</p>`);
 }
+function renderSecurity(){const S=D.security;if(!S||!$("#secInfo"))return;const B=S.blocked||{},R=B.recent||[];
+  $("#secInfo").textContent=`${S.ok?"guard complete":"guard incomplete"} · ${B.total||0} blocked all time · ${B.day||0} in 24 h`;$("#secInfo").style.color=S.ok?"":"#ff6b62";
+  const ok=v=>v?'<span class="ok">✓</span>':'<span class="bad">✗</span>';
+  $("#secState").innerHTML=`<div class="form"><span>hook</span><span>${ok(S.hook==="current")} ${esc(S.hook)} <span class="muted">${esc(S.hookPath||"")}</span></span>
+    <span>settings.json</span><span>${ok(S.hooked)} PreToolUse hook ${S.hooked?"on":"off"} · ${ok(S.denyRules>0)} ${S.denyRules||0} deny rules</span>
+    <span>CLAUDE.md</span><span>${ok(S.lesson)} ${S.lesson?"security lesson present":"security lesson missing"}</span>
+    <span>api token</span><span>${ok(S.tokenSet)} ${S.tokenSet?"set "+dt(S.tokenAt)+" UTC":"none"} <span class="muted">· rotate: <code>imd-panel token --new</code> or Telegram <code>/token new</code></span></span></div>
+    ${S.ok?"":'<div class="msg err">run <code>sh ~/imd-panel/system/install-task-guard.sh</code> on the worker machine, then restart the panel</div>'}`;
+  $("#secBlocked").innerHTML=R.length?`<table class="wide"><tr><th>when (UTC)</th><th>tool</th><th>rule</th><th>task</th><th>call</th></tr>${R.map(r=>`<tr><td>${dt(r.ts)}</td><td>${esc(r.tool)}</td><td>${esc(r.rule)}</td><td class="muted">${esc((r.task||"").slice(0,28))}</td><td><code>${esc((r.text||"").slice(0,160))}</code></td></tr>`).join("")}</table>`:'<span class="muted">nothing blocked yet</span>'}
 function renderTraffic(){
   const el=$("#traffic"),T=D.traffic;if(!el||!T)return;const h=Math.max(1/60,(Date.now()/1000-T.since)/3600),kb=n=>n>=1048576?(n/1048576).toFixed(1)+" MB":(n/1024).toFixed(0)+" kB";
   $("#trafInfo").textContent=`since ${dt(T.since)} UTC · ${fmt(T.calls)} calls · ${kb(T.wire)} on the wire (${kb(T.raw)} unpacked) · ${kb(T.wire/h*24)}/day at this pace · ${T.watched?"page open":"nobody looking"}`;

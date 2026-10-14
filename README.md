@@ -131,6 +131,10 @@ premium model, and every worker task is what it is. Everything else reads local 
 - Data joined from the worker journal, Claude Code transcripts and the public api.imd.fun (seat, submissions, standing, health, services, contributors, seat records, earnings, swarm, publications, workflows, panels, fuzz, results, oracle requests, feedback batches, work records).
 - Write actions only from loopback with a custom header; nothing runs with elevated privileges.
 
+**Settings → 12 · security**
+- Task guard state: hook installed and current, named in `~/.claude/settings.json`, deny rules in place, CLAUDE.md paragraph present, API token set.
+- Every tool call the hook blocked: when, tool, rule, task, the call itself. Telegram: `/security`, `/token`.
+
 ## Requirements
 
 - Linux with a **user** systemd session (`loginctl enable-linger $USER` so the panel survives logout).
@@ -259,16 +263,31 @@ dropped, and the poll offset lives in `telegram.state.json` so a restart never r
 
 ## Security notes
 
-The panel binds `127.0.0.1` and has no authentication of its own: anyone who can reach that port on the
-machine can operate your worker. Use the SSH tunnel or a Tailscale tailnet, do not expose the port or put
-it behind a plain reverse proxy (the localhost check on write actions would then pass for everyone). Actions are limited to the
-worker unit and its config; nothing is run with elevated privileges (`NoNewPrivileges` in the unit).
+The panel binds `127.0.0.1`, and since 14 Oct 2026 every `/api/` request needs the panel token (`X-Panel-Token`):
+localhost alone proves nothing on a worker machine, because a task the worker runs is a process on that same host.
+The token is created on first start in the state directory (mode 600); print it with `imd-panel token` (or `/token`
+in Telegram), open the panel once as `http://127.0.0.1:<port>/#token=<it>` and the page remembers it. `imd-panel
+token --new` rotates it. Reach the port through the SSH tunnel only; do not expose it or put it behind a plain
+reverse proxy. Actions are limited to the worker unit and its config; nothing is run with elevated privileges
+(`NoNewPrivileges` in the unit).
+
+**The task guard.** The 13–14 Oct 2026 attack on the swarm was 565 free oracle jobs whose "pinned definitions" were
+`sh -c` lines to run verbatim and paste back: they read `~/.identitymd/config.json` (the device key) through
+octal-escaped paths and base64, dumped process environments, probed this panel's port, pointed `imd start` at a fake
+server and ran `curl … | sh`. `system/install-task-guard.sh` installs a Claude Code PreToolUse hook
+(`system/imd-task-guard.py`) that blocks such calls in every task — the worker starts Claude with
+`--setting-sources user`, so `~/.claude/settings.json` applies to all tasks and a task's own repo cannot override it —
+adds deny rules that keep the Read tool off the device key, credentials, ssh and the panel state, and appends a
+paragraph to `~/.claude/CLAUDE.md` so the model refuses rather than retries. Blocked calls are logged, shown in
+Settings → 12 · security and sent as a notification; `system/test-task-guard.py` checks the rules against the
+attack's own lines and a worker's everyday commands. The guard is a filter on tool calls, not a sandbox: a task
+still runs as the worker's user, so keep the worker on a machine of its own.
 
 What the panel does on its own behalf:
 
 - It answers only to a `localhost` / `127.0.0.1` / `[::1]` Host (plus `allowedHosts`), so a web page that points its own
   domain at 127.0.0.1 (DNS rebinding) cannot read the feed or drive the worker through your tunnel. Write actions and log
-  exports also require a same-origin `Origin` and the `X-Dashboard` header.
+  exports also require a same-origin `Origin` and the `X-Dashboard` header, and everything under `/api/` the token.
 - The page is served with a Content-Security-Policy: scripts only from the panel itself, requests only to the panel. Text
   and links from the network (job titles, repositories, site names) are escaped, and only `http(s)` links are kept.
 - The Telegram token and the webhook URL never reach the page; Settings shows a hint of the saved value. Type `off` to

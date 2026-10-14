@@ -87,11 +87,15 @@ def main(argv=None):
     i = sub.add_parser("install", help="install and start the user systemd service on 127.0.0.1"); i.add_argument("--port", type=int, default=8787)
     sub.add_parser("uninstall", help="stop and remove the service (keeps your settings and history)")
     sub.add_parser("version", help="print the version")
+    t = sub.add_parser("token", help="print the panel's API token (open http://127.0.0.1:<port>/#token=<it> once)"); t.add_argument("--new", action="store_true", help="rotate it")
     a = p.parse_args(argv)
     if a.cmd == "install":
         install(a.port)
     elif a.cmd == "uninstall":
         uninstall()
+    elif a.cmd == "token":
+        from . import security
+        print(security.new_token() if a.new else security.token())
     elif a.cmd == "version":
         from . import __version__; print("imd-panel", __version__)
     else:

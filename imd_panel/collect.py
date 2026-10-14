@@ -2281,7 +2281,13 @@ def pass_media(d):
 
 
 # ================================================================ the pipeline: one base pass, then every enrichment in order
-PASSES = [pass_config, pass_explorer, pass_api, pass_swarm, pass_updates, pass_claude, pass_system, pass_protocol, pass_oracle_status, pass_api_docs, pass_media]
+def pass_security(d):
+    from . import security
+    d["security"] = memo("security", 20, security.data)
+    return d
+
+
+PASSES = [pass_config, pass_explorer, pass_api, pass_swarm, pass_updates, pass_claude, pass_system, pass_protocol, pass_oracle_status, pass_api_docs, pass_media, pass_security]
 
 
 def collect():

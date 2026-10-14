@@ -5,7 +5,7 @@ from .paths import state
 FILE = state("notify.json")
 STATE = state("notify.state.json")
 DEFAULT = {"telegramToken": "", "telegramChatId": "", "webhookUrl": "",
-           "events": {"limit": True, "guard": True, "heartbeat": True, "worker": True, "rejected": True, "disk": True, "released": True, "daily": True, "standing": True, "wasted": True, "api": True, "task": True, "accepted": True},
+           "events": {"limit": True, "guard": True, "heartbeat": True, "worker": True, "rejected": True, "disk": True, "released": True, "daily": True, "standing": True, "wasted": True, "api": True, "task": True, "accepted": True, "blocked": True},
            "heartbeatMin": 5, "diskGB": 10, "dailyHourUTC": 8}
 _hist = []  # (ts, text) recent sends for the UI
 
@@ -204,6 +204,19 @@ def check(d, guard_state):
         for t in new: wr["acc"][t["id"]] = now
     for k in ("seen", "acc"):  # forget ids older than two weeks; the task list itself is shorter than that
         wr[k] = {i: ts for i, ts in wr[k].items() if now - ts < 14 * 86400}
+    # 6c. tool calls the task guard blocked: one message per burst (a hostile brief tries several lines in a row)
+    sec = d.get("security") or {}; bl = (sec.get("blocked") or {}).get("recent") or []
+    if ev.get("blocked") and bl:
+        fresh = [r for r in bl if now - (r.get("ts") or 0) < 3600 and ("blocked:%d" % int(r.get("ts") or 0)) not in seen]
+        if fresh:
+            rules = {}
+            for r in fresh: rules[r.get("rule") or "?"] = rules.get(r.get("rule") or "?", 0) + 1
+            head = "🛡 <b>%d hostile tool call%s blocked</b> in task %s" % (len(fresh), "s" if len(fresh) > 1 else "", (fresh[0].get("task") or "?")[:40])
+            body = "\n".join("• %s ×%d" % (k, v) for k, v in rules.items()) + "\n<code>%s</code>" % (fresh[0].get("text") or "")[:160].replace("<", "&lt;")
+            once("blocked:%d" % int(fresh[0]["ts"]), head + "\n" + body + "\nThe brief asked for host commands: the task will answer false or stop. See Settings → 12 · security.", 10 ** 9)
+            for r in fresh: seen["blocked:%d" % int(r.get("ts") or 0)] = now
+    if ev.get("blocked") and not sec.get("ok") and sec.get("hook") is not None:
+        once("guard-missing", "⚠️ <b>Task guard incomplete</b>: hook %s · settings hook %s · deny rules %s · CLAUDE.md lesson %s — run system/install-task-guard.sh" % (sec.get("hook"), "on" if sec.get("hooked") else "off", sec.get("denyRules"), "yes" if sec.get("lesson") else "no"), 24 * 3600)
     # 7. daily digest
     if ev.get("daily"):
         g = time.gmtime(now)
