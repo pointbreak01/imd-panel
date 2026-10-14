@@ -16,15 +16,15 @@ Anything this script cannot parse is allowed (fail open): a broken hook must not
 """
 import json, os, re, sys, time
 
-VERSION = "2"
+VERSION = "3"
 HOME = os.path.expanduser("~")
 LOG_DIR = os.path.join(HOME, ".local", "state", "imd-task-guard")
 WORK = os.path.join(HOME, ".identitymd", "work")  # task workspaces live here: everything under it is the task's own
 
 # ---- paths a task has no business touching (Read/Glob/Grep/Write/Edit, and the same strings inside a shell command)
 HOME_RE = re.escape(HOME)
-DOTFILE = re.compile(r"(?:^|[\s\"'=:(])(?:~|\$HOME|\$\{HOME\}|" + HOME_RE + r")/\.(?!identitymd/work/|foundry|nvm|cargo|rustup|local/share/|local/bin/|npm|cache|config/forge|solc)", re.I)
-SECRETS = re.compile(r"\.identitymd/(?!work/)|config\.json\b.*\.identitymd|devicePrivateKey|deviceKey|\.credentials\.json|/\.claude\.json\b|authorized_keys|/\.ssh/|\.npmrc|\.bash_history|imd-panel/|tools\.env\b|notify\.json\b|/\.config/systemd", re.I)
+DOTFILE = re.compile(r"(?:^|[\s\"'=:(])(?:~|\$HOME|\$\{HOME\}|" + HOME_RE + r")/\.(?!identitymd/work(?:/|\s|$|[\"'])|foundry|nvm|cargo|rustup|local/share/|local/bin/|npm|cache|config/forge|solc)", re.I)
+SECRETS = re.compile(r"\.identitymd/(?!work(?:/|\s|$|[\"\x27]))|config\.json\b.*\.identitymd|devicePrivateKey|deviceKey|\.credentials\.json|/\.claude\.json\b|authorized_keys|/\.ssh/|\.npmrc|\.bash_history|imd-panel/|tools\.env\b|notify\.json\b|/\.config/systemd", re.I)
 OCTAL = re.compile(r"\\[0-7]{3}\\[0-7]{3}")  # printf "\056\151…": a path spelled in octal so a reviewer does not see it
 PROC = re.compile(r"/proc/(?!cpuinfo|meminfo|loadavg|version|uptime|stat\b)[^\s/]+/(?:environ|cmdline|maps|status|limits|fd|cgroup|mem|root|cwd|exe)|/proc/\*")
 ETC = re.compile(r"/etc/(?:shadow|sudoers|letsencrypt|ssh/|systemd|cron|passwd)")

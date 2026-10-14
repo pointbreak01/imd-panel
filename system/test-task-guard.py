@@ -48,10 +48,13 @@ ALLOW = [
     ("Bash", {"command": "python3 -c \"import json;print(json.load(open('artifacts/answer.json'))['answer'])\""}),
     ("Bash", {"command": "node -e \"console.log(require('./package.json').version)\""}),
     ("Bash", {"command": "cd /home/imd/.identitymd/work/abc123-oracle_assess && ls"}),
+    ("Bash", {"command": "ls -d /home/imd/.identitymd/work"}),
+    ("Bash", {"command": "ls ~/.identitymd/work 2>&1 | head"}),
 ]
 
 BLOCK = [
     ("Bash", {"command": "cat ~/.identitymd/config.json"}),
+    ("Bash", {"command": "ls ~/.identitymd/workx; cat ~/.identitymd/work-config.json"}),
     ("Bash", {"command": "cat $HOME/.identitymd/config.json | base64 -w0"}),
     ("Bash", {"command": "cat /home/imd/.identitymd/config.json"}),
     ("Bash", {"command": "head -c 700 \"$HOME/.claude/.credentials.json\""}),
