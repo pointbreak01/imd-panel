@@ -1,6 +1,6 @@
 """What keeps a task from turning against the machine: the panel's API token, and the Claude Code hook (imd-task-guard)
 that blocks hostile tool calls inside every task. Read-only here except for the token file."""
-import hashlib, hmac, json, os, secrets, shutil, time
+import hashlib, hmac, json, os, secrets, shutil, subprocess, time
 from .paths import HERE, state
 
 HOME = os.path.expanduser("~")
@@ -105,5 +105,23 @@ def status():
             "ok": hook == "current" and hooked and len(deny) > 0 and lesson}
 
 
+def worker_jail(unit):
+    """The worker's own verdict on the sandbox at its last start: since worker 0.1.2 it logs 'oracle work is off on this
+    machine: <why>' when Claude's sandbox cannot start, and nothing when it can."""
+    try:
+        out = subprocess.run(["journalctl", "--user", "-u", unit, "-n", "600", "--no-pager", "-o", "cat"], capture_output=True, text=True, timeout=20).stdout
+    except (OSError, subprocess.SubprocessError):
+        return {"state": "unknown"}
+    lines = out.splitlines()
+    starts = [i for i, ln in enumerate(lines) if " runtimes: " in ln]
+    if not starts:
+        return {"state": "unknown"}
+    block = lines[starts[-1]:starts[-1] + 12]
+    off = next((ln for ln in block if "oracle work is off" in ln), None)
+    at = block[0].split(" ")[0] if block else None
+    return {"state": "off" if off else "ok", "detail": off.split("oracle work is off on this machine: ", 1)[-1][:300] if off else "", "since": at}
+
+
 def data():
-    return {**status(), "blocked": blocked()}
+    from . import collect
+    return {**status(), "workerJail": worker_jail(collect.UNIT), "blocked": blocked()}
