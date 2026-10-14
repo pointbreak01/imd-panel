@@ -6,6 +6,8 @@
 # Installs bubblewrap (filesystem isolation) and socat (the sandbox's network relay), and lets bubblewrap create user
 # namespaces under Ubuntu 24.04's AppArmor policy (kernel.apparmor_restrict_unprivileged_userns = 1 blocks them for
 # unconfined programs; the profile below is the one Claude Code's docs give). Nothing else on the machine changes.
+# Worker >= 0.1.2 brings its own profile (`sudo imd jail-setup`, see system/imd-jail-setup.sh) and checks for it before
+# taking oracle work: on such a machine run that instead, or after this.
 # The user part — writing the sandbox settings and probing them — is system/install-sandbox.sh, run as the worker user.
 set -eu
 USER_NAME="${1:-imd}"
@@ -18,7 +20,9 @@ bwrap --version; socat -V 2>/dev/null | head -1
 
 echo "2/3 AppArmor: allow bubblewrap to create user namespaces"
 if [ "$(sysctl -n kernel.apparmor_restrict_unprivileged_userns 2>/dev/null || echo 0)" = 1 ]; then
-  if [ ! -f /etc/apparmor.d/bwrap ]; then
+  if [ -f /etc/apparmor.d/identitymd-bwrap ]; then
+    echo "   the worker's own profile (imd jail-setup) is already in place"
+  elif [ ! -f /etc/apparmor.d/bwrap ]; then
     cat > /etc/apparmor.d/bwrap <<'EOF'
 abi <abi/4.0>,
 include <tunables/global>
