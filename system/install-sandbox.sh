@@ -9,7 +9,7 @@
 # What the settings do (sandbox section of ~/.claude/settings.json; the worker starts every task's Claude with
 # --setting-sources user, so they apply to every task):
 #   - every Bash command of every task runs under bubblewrap: the home directory is read-only except the task's
-#     own directory, /tmp (tasks keep scratch there; the sandbox's own temp dir is private) and the build caches (npm, forge, solc, playwright); ~/.identitymd (except work/),
+#     own directory, /tmp (tasks keep scratch there; the sandbox's own temp dir is private) and the build caches (npm, forge, solc, playwright); the secret files of ~/.identitymd,
 #     ~/.claude credentials, ~/.ssh, ~/.config and ~/.local/state cannot even be read — by any process, forge tests with
 #     ffi, npm scripts and node one-liners included, which the imd-task-guard hook alone cannot see
 #   - the network is a separate namespace: only the hosts in allowedDomains are reachable (public RPC providers, the
@@ -57,10 +57,15 @@ LOCAL = ["127.0.0.1:8546"]  # this machine's keyed RPC relay (imd-rpc); the sand
 sb = s.setdefault("sandbox", {})
 sb.update({"enabled": True, "failIfUnavailable": True, "autoAllowBashIfSandboxed": True, "allowUnsandboxedCommands": False})
 fs = sb.setdefault("filesystem", {})
-fs["denyRead"] = sorted(set(fs.get("denyRead") or []) | {"~/.identitymd", "~/.claude/.credentials.json", "~/.claude.json", "~/.claude/settings.json",
+# NOT "~/.identitymd" as a whole: a denyRead on an ancestor of the task workspace (plus an allowRead of work/) remounts the
+# workspace read-only and every Bash command dies at setup ("bwrap: Can't create file at <workspace>/.claude/settings.json").
+# The worker's own jail (denyRead ["~"], allowRead [workspace]) handles the rest; here only the secret files themselves.
+STALE = {"~/.identitymd", "~/.identitymd/work"}
+fs["denyRead"] = sorted((set(fs.get("denyRead") or []) - STALE) | {"~/.identitymd/config.json", "~/.identitymd/config.json.*", "~/.identitymd/*.env", "~/.identitymd/tools.json",
+                        "~/.identitymd/self-test.json", "~/.identitymd/outbox", "~/.claude/.credentials.json", "~/.claude.json", "~/.claude/settings.json",
                         "~/.claude/settings.json.*", "~/.ssh", "~/.config", "~/.local/state", "~/.bash_history", "~/.npmrc", "~/.gnupg",
                         "~/imd-panel", "~/imd-tools", "~/imd-rpc", "~/imd-dashboard", "~/backups"})
-fs["allowRead"] = sorted(set(fs.get("allowRead") or []) | {"~/.identitymd/work"})
+fs["allowRead"] = sorted(set(fs.get("allowRead") or []) - STALE)
 fs["allowWrite"] = sorted(set(fs.get("allowWrite") or []) | {"/tmp", "/var/tmp", "~/.npm", "~/.cache", "~/.foundry/cache", "~/.local/share/svm", "~/.local/share/vitest", "~/.local/share/pnpm"})
 fs["denyWrite"] = sorted(set(fs.get("denyWrite") or []) | {"~/.cache/claude", "~/.cache/claude-cli-nodejs"})
 net = sb.setdefault("network", {})
@@ -88,6 +93,7 @@ except Exception as e: print("(no result)")')
 }
 probe "write to home" "denied (read-only)" "touch ~/sandbox-probe && echo WROTE || echo DENIED"
 probe "write to cwd + /tmp" "ok" "echo ok > p.txt && cat p.txt && echo t > /tmp/sandbox-probe-t && cat /tmp/sandbox-probe-t"
+W2=$(mktemp -d "$HOME/.identitymd/work/sandbox-probe-XXXX"); ( cd "$W2" && probe "write in a task workspace" "ok (the real cwd of every task)" "echo ok > w.txt && cat w.txt" ); rm -rf "$W2"
 probe "read ~/imd-rpc (denyRead)" "denied / no such file" "ls /home/$(id -un)/imd-rpc 2>&1 | head -2"
 probe "read config by hex path" "error, not a number" "python3 -c \"p=bytes.fromhex('$(printf '%s' "$HOME/.identitymd/config.json" | od -An -tx1 | tr -d ' \n')').decode();print(len(open(p).read()))\""
 probe "read own workspace" "ok" "ls -d /home/$(id -un)/.identitymd/work 2>&1"
