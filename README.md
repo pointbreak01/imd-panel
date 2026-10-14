@@ -280,8 +280,19 @@ server and ran `curl … | sh`. `system/install-task-guard.sh` installs a Claude
 adds deny rules that keep the Read tool off the device key, credentials, ssh and the panel state, and appends a
 paragraph to `~/.claude/CLAUDE.md` so the model refuses rather than retries. Blocked calls are logged, shown in
 Settings → 12 · security and sent as a notification; `system/test-task-guard.py` checks the rules against the
-attack's own lines and a worker's everyday commands. The guard is a filter on tool calls, not a sandbox: a task
-still runs as the worker's user, so keep the worker on a machine of its own.
+attack's own lines and a worker's everyday commands. The guard is a filter on tool calls, not a sandbox: code run by
+forge, npm or node inside a task is not seen by it.
+
+**The sandbox.** For that, `system/install-sandbox-deps.sh` (once, with sudo: bubblewrap, socat, the AppArmor profile
+Ubuntu 24.04 needs) and `system/install-sandbox.sh` (as the worker's user) turn on Claude Code's own sandbox in
+`~/.claude/settings.json`: every Bash command of every task, and every process it starts, runs under bubblewrap with
+the home directory read-only except the task's directory, /tmp and the build caches, `~/.identitymd` (except `work/`),
+credentials, ssh and the panel state unreadable at the kernel level, and the network limited to an allowlist of the
+hosts tasks really use (public RPC providers, imd.fun, GitHub, npm; built from this machine's transcripts). A missing
+bubblewrap makes Claude exit rather than run unsandboxed, and a blocked command cannot be retried outside the sandbox.
+The script ends with probes that show what the sandbox lets through and what it denies. The Read tool, WebFetch and
+MCP servers are outside the sandbox; the deny rules and the hook cover those. Still keep the worker on a machine of
+its own: the docs call the sandbox "not a complete isolation boundary".
 
 What the panel does on its own behalf:
 

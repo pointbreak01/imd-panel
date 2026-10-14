@@ -1,6 +1,6 @@
 """What keeps a task from turning against the machine: the panel's API token, and the Claude Code hook (imd-task-guard)
 that blocks hostile tool calls inside every task. Read-only here except for the token file."""
-import hashlib, hmac, json, os, secrets, time
+import hashlib, hmac, json, os, secrets, shutil, time
 from .paths import HERE, state
 
 HOME = os.path.expanduser("~")
@@ -90,7 +90,17 @@ def status():
             lesson = MARKER in fh.read()
     except OSError:
         lesson = False
-    return {"hook": hook, "hookPath": HOOK_BIN, "hooked": hooked, "denyRules": len(deny), "deny": deny, "lesson": lesson,
+    sb = {}
+    try:
+        with open(SETTINGS) as fh:
+            sbx = (json.load(fh).get("sandbox") or {})
+        sb = {"enabled": bool(sbx.get("enabled")), "failIfUnavailable": bool(sbx.get("failIfUnavailable")), "noRetry": sbx.get("allowUnsandboxedCommands") is False,
+              "strict": bool((sbx.get("network") or {}).get("strictAllowlist")), "domains": len((sbx.get("network") or {}).get("allowedDomains") or []),
+              "denyRead": len((sbx.get("filesystem") or {}).get("denyRead") or []), "bwrap": shutil.which("bwrap") is not None, "socat": shutil.which("socat") is not None}
+        sb["ok"] = sb["enabled"] and sb["failIfUnavailable"] and sb["noRetry"] and sb["bwrap"] and sb["socat"] and sb["denyRead"] > 0
+    except (OSError, ValueError):
+        pass
+    return {"hook": hook, "hookPath": HOOK_BIN, "hooked": hooked, "denyRules": len(deny), "deny": deny, "lesson": lesson, "sandbox": sb,
             "tokenSet": os.path.exists(TOKEN_FILE), "tokenAt": os.path.getmtime(TOKEN_FILE) if os.path.exists(TOKEN_FILE) else None,
             "ok": hook == "current" and hooked and len(deny) > 0 and lesson}
 
