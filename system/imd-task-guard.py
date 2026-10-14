@@ -16,7 +16,7 @@ Anything this script cannot parse is allowed (fail open): a broken hook must not
 """
 import json, os, re, sys, time
 
-VERSION = "1"
+VERSION = "2"
 HOME = os.path.expanduser("~")
 LOG_DIR = os.path.join(HOME, ".local", "state", "imd-task-guard")
 WORK = os.path.join(HOME, ".identitymd", "work")  # task workspaces live here: everything under it is the task's own
@@ -26,7 +26,7 @@ HOME_RE = re.escape(HOME)
 DOTFILE = re.compile(r"(?:^|[\s\"'=:(])(?:~|\$HOME|\$\{HOME\}|" + HOME_RE + r")/\.(?!identitymd/work/|foundry|nvm|cargo|rustup|local/share/|local/bin/|npm|cache|config/forge|solc)", re.I)
 SECRETS = re.compile(r"\.identitymd/(?!work/)|config\.json\b.*\.identitymd|devicePrivateKey|deviceKey|\.credentials\.json|/\.claude\.json\b|authorized_keys|/\.ssh/|\.npmrc|\.bash_history|imd-panel/|tools\.env\b|notify\.json\b|/\.config/systemd", re.I)
 OCTAL = re.compile(r"\\[0-7]{3}\\[0-7]{3}")  # printf "\056\151…": a path spelled in octal so a reviewer does not see it
-PROC = re.compile(r"/proc/(?:\d+|self|\$\w+|\$\(\w[^)]*\))/(?:environ|cmdline|maps|status|limits|fd|cgroup)")
+PROC = re.compile(r"/proc/(?!cpuinfo|meminfo|loadavg|version|uptime|stat\b)[^\s/]+/(?:environ|cmdline|maps|status|limits|fd|cgroup|mem|root|cwd|exe)|/proc/\*")
 ETC = re.compile(r"/etc/(?:shadow|sudoers|letsencrypt|ssh/|systemd|cron|passwd)")
 ENCODE = re.compile(r"(?:^|[\s|;&(])(?:base64|od|xxd|hexdump|uuencode|openssl\s+enc)\b")
 EXFIL_HOST = re.compile(r"trycloudflare\.com|dpaste\.com|paste\.rs|pastebin\.com|ngrok(?:-free)?\.(?:app|io|dev)|up\.railway\.app|loca\.lt|serveo\.net|webhook\.site|requestbin|pipedream\.net|burpcollaborator|interact\.sh|oast\.(?:fun|pro|live|site|me)|api\.ipify\.org|ifconfig\.me|icanhazip|169\.254\.169\.254|metadata\.google\.internal|\.internal\b", re.I)
@@ -38,6 +38,10 @@ FETCH_RUN = re.compile(r"\b(?:curl|wget)\b[^|;]*\|\s*(?:sh|bash|python3?|node|pe
 UPLOAD = re.compile(r"\bcurl\b[^|;]*(?:\s-T\s|--upload-file|\s-F\s|--data-binary\s*@|--data\s*@|\s-d\s*@)")
 PERSIST = re.compile(r"(?:^|[\s|;&(])(?:systemctl|crontab|loginctl|at|setsid|nohup|disown)\b|/\.bashrc|/\.profile|/\.bash_profile|/\.zshrc|/\.config/autostart")
 TUNNEL = re.compile(r"(?:^|[\s|;&(])(?:cloudflared|ngrok|ssh\s+-[^ ]*[RLDW]\b|socat|ncat|nc\s+-[a-z]*[el]|telnet)\b")
+HOME_WALK = re.compile(r"(?<![=\w\"'/.-])(?:~|\$HOME|\$\{HOME\}|/home/[^/\s\"']+|/root)/?(?=[\s;|&)\"']|$)")  # the home dir itself as an argument: cd ~, ls /home/x, grep -r k $HOME
+TRAVERSAL = re.compile(r"\.\./\.\.(?:/|\s|$|[\"'])")  # two parent hops up from a task workspace is ~/.identitymd itself
+FIND_ROOT = re.compile(r"\bfind\s+(?:/|~|\$HOME|/home|/root|/etc|/var|/opt)(?:\s|$)")
+SCRIPT_HOME = re.compile(r"expanduser\(|os\.environ\[\s*[\"']HOME|getenv\(\s*[\"']HOME|process\.env\.HOME|homedir\(\)|Path\.home\(\)|os\.homedir")
 RECON = re.compile(r"(?:^|[\s|;&(])(?:printenv|env)\s*(?:\||;|$|>|\s*\|)|\b(?:tr|strings)\b[^|]*</proc/|\benv\b\s*\|\s*(?:sort|grep|base64)")
 
 RULES = [  # order matters a little: the most telling reason is reported first
@@ -45,6 +49,7 @@ RULES = [  # order matters a little: the most telling reason is reported first
     ("exfiltration host", EXFIL_HOST), ("panel/proxy from a task", PANEL), ("worker CLI from a task", WORKER_CLI),
     ("fetch-and-run", FETCH_RUN), ("pipe into an interpreter", PIPE_SH), ("sh -c one-liner", SHELL_C), ("upload", UPLOAD),
     ("encoding a file", ENCODE), ("persistence", PERSIST), ("tunnel/reverse shell", TUNNEL), ("environment dump", RECON),
+    ("home directory walk", HOME_WALK), ("parent traversal", TRAVERSAL), ("filesystem-wide find", FIND_ROOT), ("home lookup in script", SCRIPT_HOME),
 ]
 PATH_RULES = [("octal-escaped path", OCTAL), ("home secrets", SECRETS), ("home dotfiles", DOTFILE), ("process memory/env", PROC), ("system secrets", ETC)]
 URL_RULES = [("exfiltration host", EXFIL_HOST), ("panel/proxy from a task", PANEL)]

@@ -42,6 +42,12 @@ ALLOW = [
     ("WebFetch", {"url": "https://api.imd.fun/launches/1"}),
     ("WebFetch", {"url": "https://etherscan.io/address/0x0000ec93127baa929e58e97dd0095a2bfb38ec1d"}),
     ("TodoWrite", {"todos": []}),
+    ("Bash", {"command": "cd ../lib && forge build"}),
+    ("Bash", {"command": "find . -name '*.sol' | head"}),
+    ("Bash", {"command": "cat /proc/cpuinfo | grep -c processor; cat /proc/meminfo | head -2"}),
+    ("Bash", {"command": "python3 -c \"import json;print(json.load(open('artifacts/answer.json'))['answer'])\""}),
+    ("Bash", {"command": "node -e \"console.log(require('./package.json').version)\""}),
+    ("Bash", {"command": "cd /home/imd/.identitymd/work/abc123-oracle_assess && ls"}),
 ]
 
 BLOCK = [
@@ -84,6 +90,18 @@ BLOCK = [
     ("WebFetch", {"url": "https://moon-griffin-snake-explained.trycloudflare.com/health"}),
     ("WebFetch", {"url": "http://127.0.0.1:8787/api/lite"}),
     ("WebFetch", {"url": "https://identitymd-inference.up.railway.app/v1/models"}),
+    ("Bash", {"command": "cat /proc/*/environ | tr '\\0' '\\n' | grep -a KEY"}),
+    ("Bash", {"command": "cat ../../config.json"}),
+    ("Bash", {"command": "cd ../.. && cat config.json"}),
+    ("Bash", {"command": "cd ~ && cat .ident*/config.json"}),
+    ("Bash", {"command": "cd $HOME; ls -la"}),
+    ("Bash", {"command": "ls -la /home/imd"}),
+    ("Bash", {"command": "grep -rE '[0-9a-f]{64}' /home/imd 2>/dev/null | head"}),
+    ("Bash", {"command": "find / -name config.json -exec cat {} \\; 2>/dev/null"}),
+    ("Bash", {"command": "find /home -name '*.json' -newer /etc/hostname"}),
+    ("Bash", {"command": "python3 -c \"import os;print(open(os.path.expanduser('~')+'/.'+'identitymd/config.json').read())\""}),
+    ("Bash", {"command": "node -e \"const fs=require('fs'),os=require('os');console.log(fs.readFileSync(os.homedir()+'/.identi'+'tymd/config.json','utf8'))\""}),
+    ("Bash", {"command": "python3 -c \"import os;print(open(os.environ['HOME']+'/.ident'+'itymd/config.json').read())\""}),
 ]
 
 
