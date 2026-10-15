@@ -40,6 +40,8 @@ PERSIST = re.compile(r"(?:^|[\s|;&(])(?:systemctl|crontab|loginctl|at|setsid|noh
 TUNNEL = re.compile(r"(?:^|[\s|;&(])(?:cloudflared|ngrok|ssh\s+-[^ ]*[RLDW]\b|socat|ncat|nc\s+-[a-z]*[el]|telnet)\b")
 HOME_WALK = re.compile(r"(?<![=\w\"'/.-])(?:~|\$HOME|\$\{HOME\}|/home/[^/\s\"']+|/root)/?(?=[\s;|&)\"']|$)")  # the home dir itself as an argument: cd ~, ls /home/x, grep -r k $HOME
 TRAVERSAL = re.compile(r"\.\./\.\.(?:/|\s|$|[\"'])")  # two parent hops up from a task workspace is ~/.identitymd itself
+HEREDOC = re.compile(r"<<-?\s*[\"']?(\w+)[\"']?[^\n]*\n.*?\n\1[ \t]*$", re.S | re.M)  # a here-document body: file content, not a command
+TRAVERSAL_SECRET = re.compile(r"\.\./\.\./(?:config\.json|tools\.(?:json|env)|self-test\.json|outbox|\.identitymd)")  # inside a heredoc, only a hop onto a worker secret counts
 FIND_ROOT = re.compile(r"\bfind\s+(?:/|~|\$HOME|/home|/root|/etc|/var|/opt)(?:\s|$)")
 SCRIPT_HOME = re.compile(r"expanduser\(|os\.environ\[\s*[\"']HOME|getenv\(\s*[\"']HOME|process\.env\.HOME|homedir\(\)|Path\.home\(\)|os\.homedir")
 RECON = re.compile(r"(?:^|[\s|;&(])(?:printenv|env)\s*(?:\||;|$|>|\s*\|)|\b(?:tr|strings)\b[^|]*</proc/|\benv\b\s*\|\s*(?:sort|grep|base64)")
@@ -70,6 +72,10 @@ def check(tool, inp):
     if tool == "Bash":
         cmd = str(inp.get("command") or "")
         for name, rx in RULES:
+            if rx is TRAVERSAL:  # file content written through a heredoc may legitimately say ../../src/X.sol
+                if rx.search(HEREDOC.sub("<<HEREDOC>>", cmd)) or TRAVERSAL_SECRET.search(cmd):
+                    return name, cmd
+                continue
             if rx.search(cmd):
                 return name, cmd
         return None

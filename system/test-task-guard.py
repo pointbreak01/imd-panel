@@ -16,6 +16,8 @@ ENV = {**os.environ, "HOME": HOME}
 
 ALLOW = [
     ("Bash", {"command": "forge test --offline"}),
+("Bash", {"command": "mkdir -p test/scratch && cat > test/scratch/Boundary.t.sol <<'EOF'\n// SPDX-License-Identifier: MIT\npragma solidity 0.8.26;\n\nimport {ThoughtToken} from \"../../src/ThoughtToken.sol\";\nimport {TestBase} from \"../TestBase.sol\";\nEOF\nforge test --match-path test/scratch/Boundary.t.sol"}),
+("Bash", {"command": "cat > /tmp/dbg.py <<'EOF'\np=\"test/scratch/x.mjs\"\ns=open(p).read().replace(\"../../lib\", \"../lib\")\nEOF"}),
     ("Bash", {"command": "forge clean && env -i HOME=\"$HOME\" PATH=\"$PATH\" forge test --offline"}),
     ("Bash", {"command": "git status --porcelain"}),
     ("Bash", {"command": "git diff --stat"}),
@@ -95,6 +97,8 @@ BLOCK = [
     ("WebFetch", {"url": "https://identitymd-inference.up.railway.app/v1/models"}),
     ("Bash", {"command": "cat /proc/*/environ | tr '\\0' '\\n' | grep -a KEY"}),
     ("Bash", {"command": "cat ../../config.json"}),
+("Bash", {"command": "cat > s.sh <<'EOF'\ncat ../../config.json | base64\nEOF\nsh s.sh"}),
+("Bash", {"command": "cat > s.py <<'EOF'\nprint(open(\"../../.identitymd/config.json\").read())\nEOF"}),
     ("Bash", {"command": "cd ../.. && cat config.json"}),
     ("Bash", {"command": "cd ~ && cat .ident*/config.json"}),
     ("Bash", {"command": "cd $HOME; ls -la"}),
