@@ -23,7 +23,7 @@ WORK = os.path.join(HOME, ".identitymd", "work")  # task workspaces live here: e
 
 # ---- paths a task has no business touching (Read/Glob/Grep/Write/Edit, and the same strings inside a shell command)
 HOME_RE = re.escape(HOME)
-DOTFILE = re.compile(r"(?:^|[\s\"'=:(])(?:~|\$HOME|\$\{HOME\}|" + HOME_RE + r")/\.(?!identitymd/work(?:/|\s|$|[\"'])|foundry|nvm|cargo|rustup|local/share/|local/bin/|npm|cache|config/forge|solc)", re.I)
+DOTFILE = re.compile(r"(?:^|[\s\"'=:(])(?:~|\$HOME|\$\{HOME\}|" + HOME_RE + r")/\.(?!identitymd/work(?:/|\s|$|[\"'])|foundry|svm|nvm|cargo|rustup|local/share/|local/bin/|npm|cache|config/forge|solc)", re.I)
 SECRETS = re.compile(r"\.identitymd/(?!work(?:/|\s|$|[\"\x27]))|config\.json\b.*\.identitymd|devicePrivateKey|deviceKey|\.credentials\.json|/\.claude\.json\b|authorized_keys|/\.ssh/|\.npmrc|\.bash_history|imd-panel/|tools\.env\b|notify\.json\b|/\.config/systemd", re.I)
 OCTAL = re.compile(r"\\[0-7]{3}\\[0-7]{3}")  # printf "\056\151…": a path spelled in octal so a reviewer does not see it
 PROC = re.compile(r"/proc/(?!cpuinfo|meminfo|loadavg|version|uptime|stat\b)[^\s/]+/(?:environ|cmdline|maps|status|limits|fd|cgroup|mem|root|cwd|exe)|/proc/\*")
@@ -37,7 +37,7 @@ RUN_STDIN = r"(?:sudo\s+)?(?:(?:sh|bash|dash|zsh)\b|(?:python3?|perl|node)(?:\s+
 PIPE_SH = re.compile(r"\|\s*" + RUN_STDIN, re.M)
 FETCH_RUN = re.compile(r"\b(?:curl|wget)\b[^|;]*\|\s*" + RUN_STDIN, re.M)
 UPLOAD = re.compile(r"\bcurl\b[^|;]*(?:\s-T\s|--upload-file|\s-F\s|--data-binary\s*@|--data\s*@|\s-d\s*@)")
-PERSIST = re.compile(r"(?:^|[\s|;&(])(?:systemctl|crontab|loginctl|at|setsid|nohup|disown)\b|/\.bashrc|/\.profile|/\.bash_profile|/\.zshrc|/\.config/autostart")
+PERSIST = re.compile(r"(?:^|[\s|;&(])(?:systemctl|crontab|loginctl|setsid|nohup|disown)\b|(?:^|[\s|;&(])at\s+(?:now\b|-f\b|\d{1,2}(?::\d{2})?\s*(?:am|pm)?\b|midnight|noon|teatime|tomorrow)|/\.bashrc|/\.profile|/\.bash_profile|/\.zshrc|/\.config/autostart")
 TUNNEL = re.compile(r"(?:^|[\s|;&(])(?:cloudflared|ngrok|ssh\s+-[^ ]*[RLDW]\b|socat|ncat|nc\s+-[a-z]*[el]|telnet)\b")
 HOME_WALK = re.compile(r"(?<![=\w\"'/.-])(?:~|\$HOME|\$\{HOME\}|/home/[^/\s\"']+|/root)/?(?=[\s;|&)\"']|$)")  # the home dir itself as an argument: cd ~, ls /home/x, grep -r k $HOME
 TRAVERSAL = re.compile(r"\.\./\.\.(?:/|\s|$|[\"'])")  # two parent hops up from a task workspace is ~/.identitymd itself
