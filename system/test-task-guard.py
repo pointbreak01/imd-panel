@@ -19,6 +19,7 @@ ALLOW = [
 ("Bash", {"command": "python3 - <<'EOF'\nfindings = {\"note\": \"FOUNDRY_SCRIPT pointed at an empty directory, which is at odds with the brief\"}\nEOF"}),
 ("Bash", {"command": "node --test test/*.test.mjs 2>&1 | grep -vE '^\\s*(at |#)' | head -60"}),
 ("Bash", {"command": "ls ~/.svm 2>/dev/null; ls ~/.foundry/versions 2>/dev/null"}),
+("Bash", {"command": "cat > /tmp/x.json <<'EOF'\n{\"note\": \"pool initialized at 1:1, handover at midnight, fixed at 16 sprites\"}\nEOF"}),
 ("Bash", {"command": "env -i HOME=\"$HOME\" PATH=\"$PATH\" forge inspect src/Blox.sol:Blox abi --offline --json 2>/dev/null | python3 -I -c 'import json,sys; a=json.load(sys.stdin); print(len(a))'"}),
 ("Bash", {"command": "curl -s http://127.0.0.1:8546/coingecko/api/v3/coins/pudgy-penguins | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d[\"id\"])'"}),
 ("Bash", {"command": "cat artifacts/answer.json | python3 -m json.tool > /dev/null && echo valid"}),

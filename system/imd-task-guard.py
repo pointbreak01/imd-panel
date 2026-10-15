@@ -37,7 +37,7 @@ RUN_STDIN = r"(?:sudo\s+)?(?:(?:sh|bash|dash|zsh)\b|(?:python3?|perl|node)(?:\s+
 PIPE_SH = re.compile(r"\|\s*" + RUN_STDIN, re.M)
 FETCH_RUN = re.compile(r"\b(?:curl|wget)\b[^|;]*\|\s*" + RUN_STDIN, re.M)
 UPLOAD = re.compile(r"\bcurl\b[^|;]*(?:\s-T\s|--upload-file|\s-F\s|--data-binary\s*@|--data\s*@|\s-d\s*@)")
-PERSIST = re.compile(r"(?:^|[\s|;&(])(?:systemctl|crontab|loginctl|setsid|nohup|disown)\b|(?:^|[\s|;&(])at\s+(?:now\b|-f\b|\d{1,2}(?::\d{2})?\s*(?:am|pm)?\b|midnight|noon|teatime|tomorrow)|/\.bashrc|/\.profile|/\.bash_profile|/\.zshrc|/\.config/autostart")
+PERSIST = re.compile(r"(?:^|[\s|;&(])(?:systemctl|crontab|loginctl|setsid|nohup|disown)\b|(?:^|[\s|;&(])at\s+(?:now\b|-f\s)|/\.bashrc|/\.profile|/\.bash_profile|/\.zshrc|/\.config/autostart")
 TUNNEL = re.compile(r"(?:^|[\s|;&(])(?:cloudflared|ngrok|ssh\s+-[^ ]*[RLDW]\b|socat|ncat|nc\s+-[a-z]*[el]|telnet)\b")
 HOME_WALK = re.compile(r"(?<![=\w\"'/.-])(?:~|\$HOME|\$\{HOME\}|/home/[^/\s\"']+|/root)/?(?=[\s;|&)\"']|$)")  # the home dir itself as an argument: cd ~, ls /home/x, grep -r k $HOME
 TRAVERSAL = re.compile(r"\.\./\.\.(?:/|\s|$|[\"'])")  # two parent hops up from a task workspace is ~/.identitymd itself
